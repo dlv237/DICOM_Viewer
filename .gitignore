@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+*.duckdb
+.env
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+.cache/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+**/.dockerignore
+**/Dockerfile
+
+# IDE
+.vscode/
+.idea/
+
+# Build artifacts
+build/
