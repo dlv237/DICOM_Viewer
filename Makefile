@@ -4,7 +4,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 DEV_FILES := -f docker-compose.yml -f docker-compose.dev.yml
 
-.PHONY: help build rebuild up down clean logs ps restart dev dev-down backend-shell frontend-shell smoke install-frontend run-frontend run-backend
+.PHONY: help build rebuild up down clean logs ps restart dev dev-down backend-shell frontend-shell smoke install-frontend run-frontend run-backend build-db build-db-local
 
 help: ## Mostrar esta ayuda
 	@echo "Comandos disponibles:" && \
@@ -57,3 +57,11 @@ run-frontend: ## Ejecutar Vite dev localmente (sin Docker)
 
 run-backend: ## Ejecutar backend localmente (sin Docker) con reload
 	uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --app-dir backend
+
+build-db: ## Construir/recargar DuckDB dentro de contenedor (usa overlay dev para montar ./data)
+	$(COMPOSE) $(DEV_FILES) run --rm backend python -m app.load_data
+
+build-db-local: ## Construir DuckDB localmente (requiere venv y deps instaladas)
+	PYTHONPATH=backend python backend/app/load_data.py
+
+ 

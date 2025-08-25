@@ -10,8 +10,9 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-  "strict": true,
-  "types": ["vite/client"]
+    "strict": true,
+    // Specifies the types that should be included, such as Vite's client types
+    "types": ["vite/client", "node"]
   },
   "include": ["src"]
 }
