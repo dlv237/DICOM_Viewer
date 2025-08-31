@@ -39,4 +39,5 @@ build/
 
 # FILES
 *.csv
-*.parquet
+*.parquetdata/100k_llm_findings_labels.csv
+
