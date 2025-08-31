@@ -1,28 +1,56 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Search, Loader2, FileText, Activity } from "lucide-react"
+import { Search, Loader2, FileText, Activity, ChevronLeft, ChevronRight } from "lucide-react"
+import { useNavigate } from 'react-router-dom'
 
 type Study = { studyId: string; cleanReportText?: string }
 type FindingValue = "Certainly True" | "Maybe True" | "Unknown" | "Maybe False" | "Certainly False"
 
 function App() {
+  const navigate = useNavigate()
   const [studies, setStudies] = useState<Study[]>([])
   const [loading, setLoading] = useState(true)
   const [filtering, setFiltering] = useState(false)
   const [findings, setFindings] = useState<string[]>([])
   const [selectedFinding, setSelectedFinding] = useState<string>("")
   const [selectedValue, setSelectedValue] = useState<FindingValue>("Certainly True")
+  const [page, setPage] = useState(1)
+  const [pageSize] = useState(10)
+  const [total, setTotal] = useState(0)
+
+  const fetchPage = async (pageNum = 1, finding?: string, val?: FindingValue) => {
+    const base = process.env.NODE_ENV === "development" ? "/api" : process.env.NEXT_PUBLIC_API_URL || "/api"
+    const params = new URLSearchParams()
+    params.set("page", String(pageNum))
+    params.set("page_size", String(pageSize))
+    if (finding) params.set("hallazgo", finding)
+    if (val) params.set("value", val)
+
+    const [studiesRes, countRes] = await Promise.all([
+      fetch(`${base}/studies?${params.toString()}`),
+      fetch(
+        `${base}/studies/count?${finding ? `hallazgo=${encodeURIComponent(finding)}&` : ""}${val ? `value=${encodeURIComponent(val)}` : ""}`,
+      ),
+    ])
+    const [studiesData, countData] = await Promise.all([studiesRes.json(), countRes.json()])
+    return { studiesData: studiesData as Study[], total: (countData?.count as number) ?? 0 }
+  }
 
   useEffect(() => {
-    const base = process.env.NODE_ENV === "development" ? "/api" : process.env.NEXT_PUBLIC_API_URL || "/api"
     const load = async () => {
       try {
-        const [studiesRes, findingsRes] = await Promise.all([fetch(`${base}/studies`), fetch(`${base}/findings`)])
-        const [studiesData, findingsData] = await Promise.all([studiesRes.json(), findingsRes.json()])
-        setStudies(studiesData)
+        const base = process.env.NODE_ENV === "development" ? "/api" : process.env.NEXT_PUBLIC_API_URL || "/api"
+        const findingsRes = await fetch(`${base}/findings`)
+        const findingsData: string[] = await findingsRes.json()
         setFindings(findingsData)
-        if (findingsData.length && !selectedFinding) setSelectedFinding(findingsData[0])
+
+        const chosen = selectedFinding || findingsData[0] || ""
+        if (!selectedFinding && chosen) setSelectedFinding(chosen)
+
+        const { studiesData, total } = await fetchPage(page, chosen || undefined, selectedValue)
+        setStudies(studiesData)
+        setTotal(total)
       } catch (e) {
         console.error(e)
       } finally {
@@ -33,22 +61,50 @@ function App() {
   }, [])
 
   const onFilter = async () => {
-    const base = process.env.NODE_ENV === "development" ? "/api" : process.env.NEXT_PUBLIC_API_URL || "/api"
-    const params = new URLSearchParams()
-    if (selectedFinding) params.set("hallazgo", selectedFinding)
-    if (selectedValue) params.set("value", selectedValue)
-    const url = `${base}/studies?${params.toString()}`
-    console.log(url)
     setFiltering(true)
     try {
-      const res = await fetch(url)
-      const data: Study[] = await res.json()
-      setStudies(data)
+      const { studiesData, total } = await fetchPage(1, selectedFinding || undefined, selectedValue)
+      setStudies(studiesData)
+      setTotal(total)
+      setPage(1)
     } catch (e) {
       console.error(e)
     } finally {
       setFiltering(false)
     }
+  }
+
+  const goToPage = async (pageNum: number) => {
+    if (pageNum === page || filtering) return
+    setFiltering(true)
+    try {
+      const { studiesData } = await fetchPage(pageNum, selectedFinding || undefined, selectedValue)
+      setStudies(studiesData)
+      setPage(pageNum)
+    } finally {
+      setFiltering(false)
+    }
+  }
+
+  const getPageNumbers = () => {
+    const totalPages = Math.ceil(total / pageSize)
+    const pages = []
+
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) {
+        pages.push(i)
+      }
+    } else {
+      if (page <= 4) {
+        pages.push(1, 2, 3, 4, 5, "...", totalPages)
+      } else if (page >= totalPages - 3) {
+        pages.push(1, "...", totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages)
+      } else {
+        pages.push(1, "...", page - 1, page, page + 1, "...", totalPages)
+      }
+    }
+
+    return pages
   }
 
   const getStatusColor = (value: FindingValue) => {
@@ -142,6 +198,66 @@ function App() {
           </div>
         </div>
 
+        <div className="px-6 pb-4 text-center">
+          <p className="text-sm text-slate-600">
+            Mostrando {(page - 1) * pageSize + 1} a {Math.min(page * pageSize, total)} de {total} resultados
+          </p>
+        </div>
+        {total > pageSize && (
+          
+          <nav className="flex items-center justify-between border-slate-200 px-6 py-4">
+            <div className="-mt-px flex w-0 flex-1">
+              <button
+                onClick={() => goToPage(page - 1)}
+                disabled={page <= 1 || filtering}
+                className="inline-flex items-center border-t-2 border-transparent pt-4 pr-1 text-sm font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="mr-3 h-5 w-5 text-slate-400" />
+                Anterior
+              </button>
+            </div>
+
+            <div className="hidden md:-mt-px md:flex">
+              {getPageNumbers().map((pageNum, index) =>
+                pageNum === "..." ? (
+                  <span
+                    key={`ellipsis-${index}`}
+                    className="inline-flex items-center border-t-2 border-transparent px-4 pt-4 text-sm font-medium text-slate-500"
+                  >
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={pageNum}
+                    onClick={() => goToPage(pageNum as number)}
+                    disabled={filtering}
+                    className={`inline-flex items-center border-t-2 px-4 pt-4 text-sm font-medium ${
+                      page === pageNum
+                        ? "border-blue-500 text-blue-600"
+                        : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                    } disabled:opacity-50`}
+                  >
+                    {pageNum}
+                  </button>
+                ),
+              )}
+            </div>
+
+            <div className="-mt-px flex w-0 flex-1 justify-end">
+              <button
+                onClick={() => goToPage(page + 1)}
+                disabled={page >= Math.ceil(total / pageSize) || filtering}
+                className="inline-flex items-center border-t-2 border-transparent pt-4 pl-1 text-sm font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Siguiente
+                <ChevronRight className="ml-3 h-5 w-5 text-slate-400" />
+              </button>
+            </div>
+          </nav>
+        )}
+
+        
+
         <div className="bg-white rounded-xl shadow-sm border border-slate-200">
           <div className="px-6 py-4 border-b border-slate-200">
             <div className="flex items-center justify-between">
@@ -151,9 +267,7 @@ function App() {
               </h2>
               <div className="flex items-center gap-2">
                 <span className="text-sm text-slate-600">Total encontrados:</span>
-                <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-                  {studies.length}
-                </span>
+                <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">{total}</span>
               </div>
             </div>
           </div>
@@ -173,10 +287,11 @@ function App() {
               </div>
             ) : (
               <div className="space-y-4">
-                {studies.map((s) => (
+        {studies.map((s) => (
                   <div
                     key={s.studyId}
-                    className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow duration-200"
+          className="border border-slate-200 rounded-lg p-4 hover:shadow-md transition-shadow duration-200 cursor-pointer"
+          onClick={() => navigate(`/${encodeURIComponent(s.studyId)}`)}
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
@@ -199,6 +314,64 @@ function App() {
                 ))}
               </div>
             )}
+          </div>
+
+          {total > pageSize && (
+            <nav className="flex items-center justify-between border-t border-slate-200 px-6 py-4">
+              <div className="-mt-px flex w-0 flex-1">
+                <button
+                  onClick={() => goToPage(page - 1)}
+                  disabled={page <= 1 || filtering}
+                  className="inline-flex items-center border-t-2 border-transparent pt-4 pr-1 text-sm font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="mr-3 h-5 w-5 text-slate-400" />
+                  Anterior
+                </button>
+              </div>
+
+              <div className="hidden md:-mt-px md:flex">
+                {getPageNumbers().map((pageNum, index) =>
+                  pageNum === "..." ? (
+                    <span
+                      key={`ellipsis-${index}`}
+                      className="inline-flex items-center border-t-2 border-transparent px-4 pt-4 text-sm font-medium text-slate-500"
+                    >
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      key={pageNum}
+                      onClick={() => goToPage(pageNum as number)}
+                      disabled={filtering}
+                      className={`inline-flex items-center border-t-2 px-4 pt-4 text-sm font-medium ${
+                        page === pageNum
+                          ? "border-blue-500 text-blue-600"
+                          : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700"
+                      } disabled:opacity-50`}
+                    >
+                      {pageNum}
+                    </button>
+                  ),
+                )}
+              </div>
+
+              <div className="-mt-px flex w-0 flex-1 justify-end">
+                <button
+                  onClick={() => goToPage(page + 1)}
+                  disabled={page >= Math.ceil(total / pageSize) || filtering}
+                  className="inline-flex items-center border-t-2 border-transparent pt-4 pl-1 text-sm font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Siguiente
+                  <ChevronRight className="ml-3 h-5 w-5 text-slate-400" />
+                </button>
+              </div>
+            </nav>
+          )}
+
+          <div className="px-6 pb-4 text-center">
+            <p className="text-sm text-slate-600">
+              Mostrando {(page - 1) * pageSize + 1} a {Math.min(page * pageSize, total)} de {total} resultados
+            </p>
           </div>
         </div>
       </div>
