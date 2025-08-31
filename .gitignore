@@ -41,3 +41,4 @@ build/
 *.csv
 *.parquetdata/100k_llm_findings_labels.csv
 
+data/100k_llm_findings_labels.csv
