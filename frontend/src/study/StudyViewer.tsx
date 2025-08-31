@@ -10,7 +10,7 @@ type Item = {
   BodyPartExamined?: string | null
   AcquisitionDate?: string
   AcquisitionTime?: string
-  file_path?: string
+  file_path?: string 
   dicom_path?: string
   path?: string
 }
