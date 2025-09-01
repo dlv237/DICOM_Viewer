@@ -5,6 +5,7 @@ DB_PATH = os.environ.get("DUCKDB_PATH", "/data/app.duckdb")
 # If running in container with dev overlay, data is mounted at /data_in; otherwise use repo-relative path
 DATA_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm"
 
+
 def build_db():
     con = duckdb.connect(DB_PATH)
     con.execute("DROP TABLE IF EXISTS reports")

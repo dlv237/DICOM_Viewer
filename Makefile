@@ -4,6 +4,9 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 DEV_FILES := -f docker-compose.yml -f docker-compose.dev.yml
 
+# Default path to write the DuckDB file locally (can be overridden by setting DUCKDB_PATH env)
+DUCKDB_PATH ?= /mnt/nas_anakena/datasets/uc-cxr/processed_data/app.duckdb
+
 .PHONY: help build rebuild up down clean logs ps restart dev dev-down backend-shell frontend-shell smoke install-frontend run-frontend run-backend build-db build-db-local
 
 help: ## Mostrar esta ayuda
@@ -62,6 +65,7 @@ build-db: ## Construir/recargar DuckDB dentro de contenedor (usa overlay dev par
 	$(COMPOSE) $(DEV_FILES) run --rm backend python -m app.load_data
 
 build-db-local: ## Construir DuckDB localmente (requiere venv y deps instaladas)
-	PYTHONPATH=backend python3 backend/app/load_data.py
+	@echo "Using DUCKDB_PATH=${DUCKDB_PATH}"
+	PYTHONPATH=backend DUCKDB_PATH=${DUCKDB_PATH} python3 backend/app/load_data.py
 
  
