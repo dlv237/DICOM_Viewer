@@ -20,7 +20,7 @@ function App() {
   const [total, setTotal] = useState(0)
 
   const fetchPage = async (pageNum = 1, finding?: string, val?: FindingValue) => {
-    const base = process.env.NODE_ENV === "development" ? "/api" : process.env.VITE_PUBLIC_API_URL || "/api"
+    const base = "http://localhost:8000"
     const params = new URLSearchParams()
     params.set("page", String(pageNum))
     params.set("page_size", String(pageSize))
