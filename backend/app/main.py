@@ -7,13 +7,13 @@ import os
 from typing import Any, Dict, List
 from fastapi.responses import FileResponse
 
-DB_PATH = os.environ.get("DUCKDB_PATH", "/data/app.duckdb")
+DB_PATH = "../app.duckdb"
 # Back-compat: METADATA_PARQUET_PATH may be used for both; prefer specific envs when present
-METADATA_PARQUET_PATH = os.environ.get("METADATA_PARQUET_PATH", "/data/anon.parquet")
+METADATA_PARQUET_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/metadata/anon.parquet"
 # Mapping parquet: real PHI -> anonymized ANON
-MAPPING_PARQUET_PATH = os.environ.get("MAPPING_PARQUET_PATH", METADATA_PARQUET_PATH)
+MAPPING_PARQUET_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/metadata/private_phi_index.parquet"
 # DICOM metadata parquet: rows with Study/Series/SOP and optional paths
-DICOM_METADATA_PARQUET_PATH = os.environ.get("DICOM_METADATA_PARQUET_PATH", METADATA_PARQUET_PATH)
+DICOM_METADATA_PARQUET_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/metadata/anon.parquet"
 
 app = FastAPI(title="DICOM Viewer API", version="0.1.0")
 
