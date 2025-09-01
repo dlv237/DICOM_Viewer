@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.duckdb
+.env
+.venv
+pytest.ini
+.mypy_cache
+.pytest_cache
+
+# Exclude VCS
+.git
+.gitignore
