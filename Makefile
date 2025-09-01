@@ -62,6 +62,6 @@ build-db: ## Construir/recargar DuckDB dentro de contenedor (usa overlay dev par
 	$(COMPOSE) $(DEV_FILES) run --rm backend python -m app.load_data
 
 build-db-local: ## Construir DuckDB localmente (requiere venv y deps instaladas)
-	PYTHONPATH=backend python backend/app/load_data.py
+	PYTHONPATH=backend python3 backend/app/load_data.py
 
  
