@@ -10,12 +10,16 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "cornerstone-core": "^2.6.1",
+    "cornerstone-wado-image-loader": "^4.13.2",
+    "dicom-parser": "^1.8.21",
     "lucide-react": "^0.541.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.1"
   },
   "devDependencies": {
+    "@types/cornerstone-core": "^2.3.3",
     "@types/node": "^22.17.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

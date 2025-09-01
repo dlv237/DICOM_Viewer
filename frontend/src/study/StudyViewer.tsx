@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import ImageViewer from './ImageViewer'
 
 type Item = {
   StudyInstanceUID?: string
@@ -20,6 +21,7 @@ const StudyViewer: React.FC = () => {
   const [items, setItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [openedDicom, setOpenedDicom] = useState<string | null>(null)
 
   const base = useMemo(() => (import.meta.env.DEV ? '/api' : import.meta.env.VITE_API_URL || '/api'), [])
 
@@ -66,14 +68,20 @@ const StudyViewer: React.FC = () => {
                       <div><span className="font-medium">Fecha/Hora:</span> {it.AcquisitionDate} {it.AcquisitionTime}</div>
                     </div>
                     {it.SOPInstanceUID && (
-                      <div className="mt-2">
+                      <div className="mt-3 flex gap-3">
+                        <button
+                          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
+                          onClick={() => it.SOPInstanceUID && setOpenedDicom(`${base}/dicoms/${encodeURIComponent(it.SOPInstanceUID)}`)}
+                        >
+                          Ver DICOM
+                        </button>
                         <a
-                          className="text-blue-600 hover:underline"
+                          className="px-3 py-1 bg-slate-200 hover:bg-slate-300 rounded text-sm text-slate-800"
                           href={`${base}/dicoms/${encodeURIComponent(it.SOPInstanceUID)}`}
                           target="_blank"
                           rel="noreferrer"
                         >
-                          Descargar DICOM
+                          Descargar
                         </a>
                       </div>
                     )}
@@ -84,6 +92,7 @@ const StudyViewer: React.FC = () => {
           </div>
         )}
       </div>
+  {openedDicom && <ImageViewer url={openedDicom} onClose={() => setOpenedDicom(null)} />}
     </div>
   )
 }

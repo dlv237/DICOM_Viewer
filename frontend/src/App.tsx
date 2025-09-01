@@ -20,7 +20,7 @@ function App() {
   const [total, setTotal] = useState(0)
 
   const fetchPage = async (pageNum = 1, finding?: string, val?: FindingValue) => {
-    const base = process.env.NODE_ENV === "development" ? "/api" : process.env.NEXT_PUBLIC_API_URL || "/api"
+    const base = process.env.NODE_ENV === "development" ? "/api" : process.env.VITE_PUBLIC_API_URL || "/api"
     const params = new URLSearchParams()
     params.set("page", String(pageNum))
     params.set("page_size", String(pageSize))
@@ -40,7 +40,7 @@ function App() {
   useEffect(() => {
     const load = async () => {
       try {
-        const base = process.env.NODE_ENV === "development" ? "/api" : process.env.NEXT_PUBLIC_API_URL || "/api"
+        const base = process.env.NODE_ENV === "development" ? "/api" : process.env.VITE_PUBLIC_API_URL || "/api"
         const findingsRes = await fetch(`${base}/findings`)
         const findingsData: string[] = await findingsRes.json()
         setFindings(findingsData)
@@ -132,7 +132,6 @@ function App() {
             <Activity className="h-8 w-8 text-blue-600" />
             <h1 className="text-3xl font-bold text-slate-800">DICOM Viewer</h1>
           </div>
-          <p className="text-slate-600">Sistema de búsqueda y análisis de estudios médicos</p>
         </div>
       </div>
 

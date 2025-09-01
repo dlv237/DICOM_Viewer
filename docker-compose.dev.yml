@@ -12,14 +12,19 @@ services:
       - ./data:/data_in
       - duckdb_data:/data
     environment:
-      - DUCKDB_PATH=/data/app.duckdb
-      - METADATA_PARQUET_PATH=/data_in/anon.parquet
+      DUCKDB_PATH: /data/app.duckdb
+      # Back-compat variable (still read by the app); keep pointing to the DICOM metadata parquet
+      METADATA_PARQUET_PATH: /data_in/anon.parquet
+      # Explicit paths for mapping (PHI->ANON) and DICOM metadata parquet
+      MAPPING_PARQUET_PATH: /data_in/private_phi_index.parquet
+      DICOM_METADATA_PARQUET_PATH: /data_in/anon.parquet
     ports:
       - "8000:8000"
 
   frontend:
     command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0 --port 5173"]
     environment:
+      - VITE_PROXY_TARGET=http://backend:8000
       - VITE_API_URL=
     volumes:
       - ./frontend:/app

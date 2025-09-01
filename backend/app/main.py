@@ -8,11 +8,12 @@ from typing import Any, Dict, List
 from fastapi.responses import FileResponse
 
 DB_PATH = os.environ.get("DUCKDB_PATH", "/data/app.duckdb")
-# Absolute Parquet metadata path (must be accessible inside the backend container)
-METADATA_PARQUET_PATH = os.environ.get(
-    "METADATA_PARQUET_PATH",
-    "/data/anon.parquet",
-)
+# Back-compat: METADATA_PARQUET_PATH may be used for both; prefer specific envs when present
+METADATA_PARQUET_PATH = os.environ.get("METADATA_PARQUET_PATH", "/data/anon.parquet")
+# Mapping parquet: real PHI -> anonymized ANON
+MAPPING_PARQUET_PATH = os.environ.get("MAPPING_PARQUET_PATH", METADATA_PARQUET_PATH)
+# DICOM metadata parquet: rows with Study/Series/SOP and optional paths
+DICOM_METADATA_PARQUET_PATH = os.environ.get("DICOM_METADATA_PARQUET_PATH", METADATA_PARQUET_PATH)
 
 app = FastAPI(title="DICOM Viewer API", version="0.1.0")
 
@@ -78,6 +79,43 @@ def _detect_study_uid_column(available_cols: set[str]) -> str | None:
             return c
     return None
 
+def _find_col(available_cols: set[str], candidates: list[str]) -> str | None:
+    """Find a column in available_cols that matches any candidate (case-insensitive),
+    and return the original-case column name."""
+    # Build lowercase -> original map
+    lower_map = {c.lower(): c for c in available_cols}
+    for cand in candidates:
+        key = cand.lower()
+        if key in lower_map:
+            return lower_map[key]
+    return None
+
+def _map_real_to_anon_study_uid(real_uid: str) -> str | None:
+    """Map a real StudyInstanceUID to its anonymized counterpart using the Parquet mapping.
+
+    Expects two columns in the Parquet (names can vary); tries common candidates:
+    - real: StudyInstanceUID | studyID | original_study_uid | real_study_uid
+    - anon: anon_study_uid | AnonymizedStudyInstanceUID | anonStudyInstanceUID
+    Returns the anonymized UID if found; otherwise None.
+    """
+    if not os.path.exists(MAPPING_PARQUET_PATH):
+        return None
+    try:
+        cols_info = _query_parquet("DESCRIBE SELECT * FROM read_parquet(?) LIMIT 0", [MAPPING_PARQUET_PATH])
+        available = {c.get("column_name") for c in cols_info if isinstance(c, dict) and c.get("column_name")}
+        # Prefer explicit PHI/ANON, then fall back to other common names
+        real_col = _find_col(available, ["PHI"]) or _find_col(available, ["StudyInstanceUID", "studyID", "original_study_uid", "real_study_uid"]) 
+        anon_col = _find_col(available, ["ANON"]) or _find_col(available, ["anon_study_uid", "AnonymizedStudyInstanceUID", "anonStudyInstanceUID", "anon_StudyInstanceUID"]) 
+        if not real_col or not anon_col:
+            return None
+        sql = f'SELECT "{anon_col}" AS anon FROM read_parquet(?) WHERE "{real_col}" = ? LIMIT 1'
+        rows = _query_parquet(sql, [MAPPING_PARQUET_PATH, real_uid])
+        if rows:
+            return rows[0].get("anon")
+        return None
+    except Exception:
+        return None
+
 @app.get("/findings")
 def get_findings():
     try:
@@ -89,31 +127,40 @@ def get_findings():
 
 @app.get("/dicoms/{sop_instance_uid}")
 def get_dicom_by_sop(sop_instance_uid: str):
-    """Stream a DICOM file by SOPInstanceUID resolved from the Parquet metadata.
+    """Stream a DICOM file by SOPInstanceUID.
 
-    Returns application/dicom if possible, else octet-stream.
+    Resolution order:
+    1) Direct file under common roots using the SOP as filename: {SOP}.dcm
+       Roots checked: /app/data (mounted from ./backend/data), /data_in (mounted from ./data), /data (duckdb volume or extra mount)
+    2) If Parquet metadata is available, resolve by SOP and use the path column
     """
     try:
-        if not os.path.exists(METADATA_PARQUET_PATH):
-            raise HTTPException(status_code=503, detail="Parquet no disponible.")
+        # 1) Direct file lookup
+        filename = f"{sop_instance_uid}.dcm"
+        for root in ("/app/data", "/data_in", "/data"):
+            path = os.path.join(root, filename)
+            if os.path.exists(path):
+                return FileResponse(path, media_type="application/dicom", filename=os.path.basename(path))
 
-        # Determine columns
-        cols_info = _query_parquet("DESCRIBE SELECT * FROM read_parquet(?) LIMIT 0", [METADATA_PARQUET_PATH])
-        available_cols = {c["column_name"] for c in cols_info if "column_name" in c}
-        file_cols = [c for c in ("file_path", "dicom_path", "path") if c in available_cols]
-        if not file_cols:
-            raise HTTPException(status_code=500, detail="No se encontraron columnas de ruta de archivo en el parquet.")
-        file_col = file_cols[0]
+        # 2) Parquet-based resolution (optional)
+        if os.path.exists(DICOM_METADATA_PARQUET_PATH):
+            try:
+                cols_info = _query_parquet("DESCRIBE SELECT * FROM read_parquet(?) LIMIT 0", [DICOM_METADATA_PARQUET_PATH])
+                available_cols = {c["column_name"] for c in cols_info if "column_name" in c}
+                file_cols = [c for c in ("file_path", "dicom_path", "path") if c in available_cols]
+                if file_cols:
+                    file_col = file_cols[0]
+                    sql = f'SELECT "{file_col}" FROM read_parquet(?) WHERE "SOPInstanceUID" = ? LIMIT 1'
+                    rows = _query_parquet(sql, [DICOM_METADATA_PARQUET_PATH, sop_instance_uid])
+                    if rows:
+                        parquet_path = rows[0][file_col]
+                        if isinstance(parquet_path, str) and os.path.exists(parquet_path):
+                            return FileResponse(parquet_path, media_type="application/dicom", filename=os.path.basename(parquet_path))
+            except Exception:
+                # ignore parquet errors and continue
+                pass
 
-        sql = f'SELECT "{file_col}" FROM read_parquet(?) WHERE "SOPInstanceUID" = ? LIMIT 1'
-        rows = _query_parquet(sql, [METADATA_PARQUET_PATH, sop_instance_uid])
-        if not rows:
-            raise HTTPException(status_code=404, detail="SOPInstanceUID no encontrado.")
-        path = rows[0][file_col]
-        if not isinstance(path, str) or not os.path.exists(path):
-            raise HTTPException(status_code=404, detail="Archivo DICOM no disponible en el servidor.")
-        # Let the browser/viewer fetch bytes
-        return FileResponse(path, media_type="application/dicom", filename=os.path.basename(path))
+        raise HTTPException(status_code=404, detail="Archivo DICOM no encontrado en /app/data, /data_in, /data ni por parquet.")
     except HTTPException:
         raise
     except Exception as e:
@@ -127,21 +174,24 @@ def get_studies(
     page_size: int = Query(default=20, ge=1, le=100, description="Cantidad de resultados por página"),
 ):
     print("Fetching studies with filters:", {hallazgo, value, page, page_size})
+    # Build filtered, deduplicated list of studies (unique studyID)
+    # Use a representative text per study (MIN as deterministic choice)
     base_select = (
-        "SELECT studyID AS studyId, clean_report_text AS cleanReportText FROM reports"
+        "SELECT studyID AS studyId, MIN(clean_report_text) AS cleanReportText FROM reports"
     )
     params: list = []
-    where = ""
+    where_clauses = ["studyID IS NOT NULL"]
     if hallazgo is not None and value is not None:
         # Validate hallazgo exists to avoid SQL injection
         valid_cols = set(_finding_columns())
         if hallazgo not in valid_cols:
             raise HTTPException(status_code=400, detail=f"Hallazgo desconocido: {hallazgo}")
-        where = f" WHERE {_quote_ident(hallazgo)} = ?"
+        where_clauses.append(f"{_quote_ident(hallazgo)} = ?")
         params.append(value)
 
     # Stable ordering helps consistent pagination
-    query = base_select + where + " ORDER BY studyID LIMIT ? OFFSET ?"
+    where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    query = base_select + where_sql + " GROUP BY studyID ORDER BY studyID LIMIT ? OFFSET ?"
     params.extend([page_size, (page - 1) * page_size])
     with duckdb.connect(DB_PATH, read_only=True) as con:
         rows = con.execute(query, params).fetchall()
@@ -153,17 +203,17 @@ def get_studies_count(
     value: str | None = Query(default=None, description="Valor del hallazgo (e.g., 'Certainly True')"),
 ):
     try:
-        base_select = "SELECT COUNT(*) FROM reports"
+        base_select = "SELECT COUNT(DISTINCT studyID) FROM reports"
         params: list = []
-        where = ""
+        where_clauses = ["studyID IS NOT NULL"]
         if hallazgo is not None and value is not None:
             valid_cols = set(_finding_columns())
             if hallazgo not in valid_cols:
                 raise HTTPException(status_code=400, detail=f"Hallazgo desconocido: {hallazgo}")
-            where = f" WHERE {_quote_ident(hallazgo)} = ?"
+            where_clauses.append(f"{_quote_ident(hallazgo)} = ?")
             params.append(value)
-
-        query = base_select + where
+        where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+        query = base_select + where_sql
         with duckdb.connect(DB_PATH, read_only=True) as con:
             count = con.execute(query, params).fetchone()[0]
         return {"count": int(count)}
@@ -181,22 +231,36 @@ def get_study_dicoms(study_id: str):
     - We select a useful subset of columns when available; otherwise we return all available columns.
     """
     try:
-        if not os.path.exists(METADATA_PARQUET_PATH):
+        if not os.path.exists(DICOM_METADATA_PARQUET_PATH):
             raise HTTPException(
                 status_code=503,
-                detail=f"Parquet no disponible en ruta: {METADATA_PARQUET_PATH}. Monte el NAS y/o configure METADATA_PARQUET_PATH.",
+                detail=f"Parquet no disponible en ruta: {DICOM_METADATA_PARQUET_PATH}. Configure DICOM_METADATA_PARQUET_PATH.",
             )
 
         # Probe available columns first
-        describe_sql = (
-            "DESCRIBE SELECT * FROM read_parquet(?) LIMIT 0"
-        )
-        cols_info = _query_parquet(describe_sql, [METADATA_PARQUET_PATH])
+        describe_sql = "DESCRIBE SELECT * FROM read_parquet(?) LIMIT 0"
+        cols_info = _query_parquet(describe_sql, [DICOM_METADATA_PARQUET_PATH])
         available_cols = {c["column_name"] for c in cols_info if "column_name" in c}
 
         uid_col = _detect_study_uid_column(available_cols)
         if not uid_col:
             raise HTTPException(status_code=500, detail="No se encontró columna de Study UID en el parquet.")
+
+        # If the incoming study_id is real, try to map it to anonymized value first
+        anon_uid = _map_real_to_anon_study_uid(study_id)
+        print(study_id, anon_uid)
+        target_uid = anon_uid or study_id
+
+        # Decide which column to filter on. Prefer the anonymized column when mapping succeeded.
+        filter_col = uid_col
+        if anon_uid:
+            anon_filter_col = _find_col(available_cols, [
+                "ANON", "anon", "anon_study_uid", "AnonymizedStudyInstanceUID", "anonStudyInstanceUID", "anon_StudyInstanceUID"
+            ])
+            if anon_filter_col:
+                filter_col = anon_filter_col
+
+        print(f"Filtrando por columna: {filter_col}")
 
         # Prefer selecting a compact set if present
         preferred = [
@@ -218,11 +282,9 @@ def get_study_dicoms(study_id: str):
         else:
             select_expr = ", ".join(f'"{c}"' for c in select_cols)
 
-        sql = (
-            f"SELECT {select_expr} FROM read_parquet(?) WHERE \"{uid_col}\" = ? LIMIT 2000"
-        )
-        rows = _query_parquet(sql, [METADATA_PARQUET_PATH, study_id])
-        return {"studyId": study_id, "count": len(rows), "items": rows}
+        sql = f'SELECT {select_expr} FROM read_parquet(?) WHERE "{filter_col}" = ? LIMIT 2000'
+        rows = _query_parquet(sql, [DICOM_METADATA_PARQUET_PATH, target_uid])
+        return {"studyId": study_id, "mappedStudyId": target_uid if target_uid != study_id else None, "count": len(rows), "items": rows}
     except HTTPException:
         raise
     except Exception as e:
@@ -232,12 +294,12 @@ def get_study_dicoms(study_id: str):
 def list_dicom_studies(limit: int = Query(default=10, ge=1, le=100)):
     """List unique Study UIDs from the Parquet (up to limit) for quick testing."""
     try:
-        if not os.path.exists(METADATA_PARQUET_PATH):
+        if not os.path.exists(DICOM_METADATA_PARQUET_PATH):
             raise HTTPException(
                 status_code=503,
-                detail=f"Parquet no disponible en ruta: {METADATA_PARQUET_PATH}.",
+                detail=f"Parquet no disponible en ruta: {DICOM_METADATA_PARQUET_PATH}.",
             )
-        cols_info = _query_parquet("DESCRIBE SELECT * FROM read_parquet(?) LIMIT 0", [METADATA_PARQUET_PATH])
+        cols_info = _query_parquet("DESCRIBE SELECT * FROM read_parquet(?) LIMIT 0", [DICOM_METADATA_PARQUET_PATH])
         available_cols = {c["column_name"] for c in cols_info if "column_name" in c}
         uid_col = _detect_study_uid_column(available_cols)
         if not uid_col:
@@ -250,10 +312,8 @@ def list_dicom_studies(limit: int = Query(default=10, ge=1, le=100)):
         else:
             select_expr = f'"{uid_col}"'
 
-        sql = (
-            f"SELECT DISTINCT {select_expr} FROM read_parquet(?) WHERE \"{uid_col}\" IS NOT NULL LIMIT ?"
-        )
-        rows = _query_parquet(sql, [METADATA_PARQUET_PATH, limit])
+        sql = f'SELECT DISTINCT {select_expr} FROM read_parquet(?) WHERE "{uid_col}" IS NOT NULL LIMIT ?'
+        rows = _query_parquet(sql, [DICOM_METADATA_PARQUET_PATH, limit])
         return {"uidColumn": uid_col, "items": rows}
     except HTTPException:
         raise
