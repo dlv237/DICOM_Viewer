@@ -170,10 +170,15 @@ def get_dicom_by_sop(sop_instance_uid: str):
 def get_studies(
     hallazgo: str | None = Query(default=None, description="Nombre de la columna de hallazgo a filtrar"),
     value: str | None = Query(default=None, description="Valor del hallazgo (e.g., 'Certainly True')"),
+    min_age: int = Query(default=18, ge=0, description="Edad mínima inclusiva"),
+    max_age: int = Query(default=100, ge=0, description="Edad máxima inclusiva"),
     page: int = Query(default=1, ge=1, description="Número de página (1-indexed)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Cantidad de resultados por página"),
 ):
-    print("Fetching studies with filters:", {hallazgo, value, page, page_size})
+    # Normalize age bounds
+    if min_age > max_age:
+        min_age, max_age = max_age, min_age
+    print("Fetching studies with filters:", {hallazgo, value, min_age, max_age, page, page_size})
     # Build filtered, deduplicated list of studies (unique studyID)
     # Use a representative text per study (MIN as deterministic choice)
     base_select = (
@@ -188,6 +193,9 @@ def get_studies(
             raise HTTPException(status_code=400, detail=f"Hallazgo desconocido: {hallazgo}")
         where_clauses.append(f"{_quote_ident(hallazgo)} = ?")
         params.append(value)
+    # Age range filter (inclusive)
+    where_clauses.append("age BETWEEN ? AND ?")
+    params.extend([min_age, max_age])
 
     # Stable ordering helps consistent pagination
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
@@ -201,6 +209,8 @@ def get_studies(
 def get_studies_count(
     hallazgo: str | None = Query(default=None, description="Nombre de la columna de hallazgo a filtrar"),
     value: str | None = Query(default=None, description="Valor del hallazgo (e.g., 'Certainly True')"),
+    min_age: int = Query(default=18, ge=0, description="Edad mínima inclusiva"),
+    max_age: int = Query(default=100, ge=0, description="Edad máxima inclusiva"),
 ):
     try:
         base_select = "SELECT COUNT(DISTINCT studyID) FROM reports"
@@ -212,6 +222,11 @@ def get_studies_count(
                 raise HTTPException(status_code=400, detail=f"Hallazgo desconocido: {hallazgo}")
             where_clauses.append(f"{_quote_ident(hallazgo)} = ?")
             params.append(value)
+        # Normalize and apply age bounds
+        if min_age > max_age:
+            min_age, max_age = max_age, min_age
+        where_clauses.append("age BETWEEN ? AND ?")
+        params.extend([min_age, max_age])
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         query = base_select + where_sql
         with duckdb.connect(DB_PATH, read_only=True) as con:

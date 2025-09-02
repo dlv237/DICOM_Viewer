@@ -15,23 +15,33 @@ function App() {
   const [findings, setFindings] = useState<string[]>([])
   const [selectedFinding, setSelectedFinding] = useState<string>("")
   const [selectedValue, setSelectedValue] = useState<FindingValue>("Certainly True")
+  const [temporallySelectedValue, setTemporallySelectedValue] = useState<FindingValue>("Certainly True")
   const [page, setPage] = useState(1)
   const [pageSize] = useState(10)
   const [total, setTotal] = useState(0)
+  const [minAge, setMinAge] = useState<number>(18)
+  const [maxAge, setMaxAge] = useState<number>(100)
 
-  const fetchPage = async (pageNum = 1, finding?: string, val?: FindingValue) => {
+  const fetchPage = async (pageNum = 1, finding?: string, val?: FindingValue, minA: number = minAge, maxA: number = maxAge) => {
     const base = "http://localhost:8000"
     const params = new URLSearchParams()
     params.set("page", String(pageNum))
     params.set("page_size", String(pageSize))
+    params.set("min_age", String(minA))
+    params.set("max_age", String(maxA))
     if (finding) params.set("hallazgo", finding)
     if (val) params.set("value", val)
 
     const [studiesRes, countRes] = await Promise.all([
       fetch(`${base}/studies?${params.toString()}`),
-      fetch(
-        `${base}/studies/count?${finding ? `hallazgo=${encodeURIComponent(finding)}&` : ""}${val ? `value=${encodeURIComponent(val)}` : ""}`,
-      ),
+      (() => {
+        const paramsCount = new URLSearchParams()
+        if (finding) paramsCount.set("hallazgo", finding)
+        if (val) paramsCount.set("value", val)
+        paramsCount.set("min_age", String(minA))
+        paramsCount.set("max_age", String(maxA))
+        return fetch(`${base}/studies/count?${paramsCount.toString()}`)
+      })(),
     ])
     const [studiesData, countData] = await Promise.all([studiesRes.json(), countRes.json()])
     return { studiesData: studiesData as Study[], total: (countData?.count as number) ?? 0 }
@@ -48,7 +58,7 @@ function App() {
         const chosen = selectedFinding || findingsData[0] || ""
         if (!selectedFinding && chosen) setSelectedFinding(chosen)
 
-        const { studiesData, total } = await fetchPage(page, chosen || undefined, selectedValue)
+  const { studiesData, total } = await fetchPage(page, chosen || undefined, selectedValue, minAge, maxAge)
         setStudies(studiesData)
         setTotal(total)
       } catch (e) {
@@ -63,10 +73,11 @@ function App() {
   const onFilter = async () => {
     setFiltering(true)
     try {
-      const { studiesData, total } = await fetchPage(1, selectedFinding || undefined, selectedValue)
+  const { studiesData, total } = await fetchPage(1, selectedFinding || undefined, temporallySelectedValue, minAge, maxAge)
       setStudies(studiesData)
       setTotal(total)
       setPage(1)
+  setSelectedValue(temporallySelectedValue)
     } catch (e) {
       console.error(e)
     } finally {
@@ -78,7 +89,7 @@ function App() {
     if (pageNum === page || filtering) return
     setFiltering(true)
     try {
-      const { studiesData } = await fetchPage(pageNum, selectedFinding || undefined, selectedValue)
+  const { studiesData } = await fetchPage(pageNum, selectedFinding || undefined, selectedValue, minAge, maxAge)
       setStudies(studiesData)
       setPage(pageNum)
     } finally {
@@ -142,7 +153,7 @@ function App() {
             Filtros de Búsqueda
           </h2>
 
-          <div className="grid md:grid-cols-3 gap-4 items-end">
+          <div className="grid md:grid-cols-5 gap-4 items-end">
             <div className="space-y-2">
               <label className="block text-sm font-medium text-slate-700">Hallazgo Médico</label>
               <select
@@ -163,7 +174,7 @@ function App() {
               <label className="block text-sm font-medium text-slate-700">Valor de Certeza</label>
               <select
                 value={selectedValue}
-                onChange={(e) => setSelectedValue(e.target.value as FindingValue)}
+                onChange={(e) => setTemporallySelectedValue(e.target.value as FindingValue)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
                 disabled={loading || filtering}
               >
@@ -175,6 +186,30 @@ function App() {
                   ),
                 )}
               </select>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700">Edad mínima</label>
+              <input
+                type="number"
+                min={0}
+                value={minAge}
+                onChange={(e) => setMinAge(Number.isNaN(parseInt(e.target.value)) ? 0 : parseInt(e.target.value))}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
+                disabled={loading || filtering}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700">Edad máxima</label>
+              <input
+                type="number"
+                min={0}
+                value={maxAge}
+                onChange={(e) => setMaxAge(Number.isNaN(parseInt(e.target.value)) ? 0 : parseInt(e.target.value))}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
+                disabled={loading || filtering}
+              />
             </div>
 
             <button
