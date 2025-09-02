@@ -23,7 +23,7 @@ const StudyViewer: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const [openedDicom, setOpenedDicom] = useState<string | null>(null)
 
-  const base = useMemo(() => (import.meta.env.DEV ? '/api' : import.meta.env.VITE_API_URL || '/api'), [])
+  const base = "http://localhost:8000"
 
   useEffect(() => {
     const load = async () => {
