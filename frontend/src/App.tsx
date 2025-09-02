@@ -40,7 +40,7 @@ function App() {
   useEffect(() => {
     const load = async () => {
       try {
-        const base = process.env.NODE_ENV === "development" ? "/api" : process.env.VITE_PUBLIC_API_URL || "/api"
+        const base = "http://localhost:8000"
         const findingsRes = await fetch(`${base}/findings`)
         const findingsData: string[] = await findingsRes.json()
         setFindings(findingsData)

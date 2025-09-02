@@ -7,7 +7,7 @@ import os
 from typing import Any, Dict, List
 from fastapi.responses import FileResponse
 
-DB_PATH = "../app.duckdb"
+DB_PATH = "/home/dolobos/DICOM_Viewer/app.duckdb"
 # Back-compat: METADATA_PARQUET_PATH may be used for both; prefer specific envs when present
 METADATA_PARQUET_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/metadata/anon.parquet"
 # Mapping parquet: real PHI -> anonymized ANON
