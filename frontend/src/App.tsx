@@ -21,14 +21,23 @@ function App() {
   const [total, setTotal] = useState(0)
   const [minAge, setMinAge] = useState<number>(18)
   const [maxAge, setMaxAge] = useState<number>(100)
+  const [useSample1k, setUseSample1k] = useState<boolean>(false)
 
-  const fetchPage = async (pageNum = 1, finding?: string, val?: FindingValue, minA: number = minAge, maxA: number = maxAge) => {
+  const fetchPage = async (
+    pageNum = 1, 
+    finding?: string, 
+    val?: FindingValue, 
+    minA: number = minAge, 
+    maxA: number = maxAge,
+    sample: boolean = useSample1k,
+  ) => {
     const base = "http://localhost:8000"
     const params = new URLSearchParams()
     params.set("page", String(pageNum))
     params.set("page_size", String(pageSize))
     params.set("min_age", String(minA))
     params.set("max_age", String(maxA))
+    params.set("sample_1k", sample ? "true" : "false")
     if (finding) params.set("hallazgo", finding)
     if (val) params.set("value", val)
 
@@ -40,6 +49,7 @@ function App() {
         if (val) paramsCount.set("value", val)
         paramsCount.set("min_age", String(minA))
         paramsCount.set("max_age", String(maxA))
+        paramsCount.set("sample_1k", sample ? "true" : "false")
         return fetch(`${base}/studies/count?${paramsCount.toString()}`)
       })(),
     ])
@@ -58,7 +68,7 @@ function App() {
         const chosen = selectedFinding || findingsData[0] || ""
         if (!selectedFinding && chosen) setSelectedFinding(chosen)
 
-  const { studiesData, total } = await fetchPage(page, chosen || undefined, selectedValue, minAge, maxAge)
+        const { studiesData, total } = await fetchPage(page, chosen || undefined, selectedValue, minAge, maxAge, useSample1k)
         setStudies(studiesData)
         setTotal(total)
       } catch (e) {
@@ -77,7 +87,7 @@ function App() {
       setStudies(studiesData)
       setTotal(total)
       setPage(1)
-  setSelectedValue(temporallySelectedValue)
+      setSelectedValue(temporallySelectedValue)
     } catch (e) {
       console.error(e)
     } finally {
@@ -89,7 +99,7 @@ function App() {
     if (pageNum === page || filtering) return
     setFiltering(true)
     try {
-  const { studiesData } = await fetchPage(pageNum, selectedFinding || undefined, selectedValue, minAge, maxAge)
+      const { studiesData } = await fetchPage(pageNum, selectedFinding || undefined, selectedValue, minAge, maxAge, useSample1k)
       setStudies(studiesData)
       setPage(pageNum)
     } finally {
@@ -210,6 +220,20 @@ function App() {
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
                 disabled={loading || filtering}
               />
+            </div>
+
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                id="useSample1k"
+                type="checkbox"
+                checked={useSample1k}
+                onChange={(e) => setUseSample1k(e.target.checked)}
+                disabled={loading || filtering}
+                className="h-4 w-4 text-blue-600 border-slate-300 rounded"
+              />
+              <label htmlFor="useSample1k" className="text-sm font-medium text-slate-700">
+                Revisar Sample de 1k para CentaurLabs
+              </label>
             </div>
 
             <button

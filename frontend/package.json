@@ -12,6 +12,7 @@
   "dependencies": {
     "cornerstone-core": "^2.6.1",
     "cornerstone-wado-image-loader": "^4.13.2",
+    "dcmjs": "^0.45.0",
     "dicom-parser": "^1.8.21",
     "lucide-react": "^0.541.0",
     "react": "^18.3.1",

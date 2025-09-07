@@ -14,7 +14,11 @@ METADATA_PARQUET_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/metadat
 MAPPING_PARQUET_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/metadata/private_phi_index.parquet"
 # DICOM metadata parquet: rows with Study/Series/SOP and optional paths
 DICOM_METADATA_PARQUET_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/metadata/anon.parquet"
-
+# CSV sample 1k (CentaurLabs)
+SAMPLE_1K_CSV_PATH = os.environ.get(
+    "SAMPLE_1K_CSV_PATH",
+    "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm/sample_1k_for_centaurlabs.csv",
+)
 app = FastAPI(title="DICOM Viewer API", version="0.1.0")
 
 app.add_middleware(
@@ -174,28 +178,34 @@ def get_studies(
     max_age: int = Query(default=100, ge=0, description="Edad máxima inclusiva"),
     page: int = Query(default=1, ge=1, description="Número de página (1-indexed)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Cantidad de resultados por página"),
+    sample_1k: bool = Query(default=False, description="Limitar a los studyID del CSV de sample 1k"),
 ):
     # Normalize age bounds
     if min_age > max_age:
         min_age, max_age = max_age, min_age
-    print("Fetching studies with filters:", {hallazgo, value, min_age, max_age, page, page_size})
-    # Build filtered, deduplicated list of studies (unique studyID)
-    # Use a representative text per study (MIN as deterministic choice)
+    # ...existing code...
     base_select = (
         "SELECT studyID AS studyId, MIN(clean_report_text) AS cleanReportText FROM reports"
     )
     params: list = []
     where_clauses = ["studyID IS NOT NULL"]
     if hallazgo is not None and value is not None:
-        # Validate hallazgo exists to avoid SQL injection
         valid_cols = set(_finding_columns())
         if hallazgo not in valid_cols:
             raise HTTPException(status_code=400, detail=f"Hallazgo desconocido: {hallazgo}")
         where_clauses.append(f"{_quote_ident(hallazgo)} = ?")
         params.append(value)
+
     # Age range filter (inclusive)
     where_clauses.append("age BETWEEN ? AND ?")
     params.extend([min_age, max_age])
+
+    # Sample 1k filter
+    if sample_1k:
+        if not os.path.exists(SAMPLE_1K_CSV_PATH):
+            raise HTTPException(status_code=503, detail=f"CSV 1k no disponible en ruta: {SAMPLE_1K_CSV_PATH}")
+        where_clauses.append('studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?))')
+        params.append(SAMPLE_1K_CSV_PATH)
 
     # Stable ordering helps consistent pagination
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
@@ -211,6 +221,7 @@ def get_studies_count(
     value: str | None = Query(default=None, description="Valor del hallazgo (e.g., 'Certainly True')"),
     min_age: int = Query(default=18, ge=0, description="Edad mínima inclusiva"),
     max_age: int = Query(default=100, ge=0, description="Edad máxima inclusiva"),
+    sample_1k: bool = Query(default=False, description="Limitar a los studyID del CSV de sample 1k"),
 ):
     try:
         base_select = "SELECT COUNT(DISTINCT studyID) FROM reports"
@@ -222,11 +233,18 @@ def get_studies_count(
                 raise HTTPException(status_code=400, detail=f"Hallazgo desconocido: {hallazgo}")
             where_clauses.append(f"{_quote_ident(hallazgo)} = ?")
             params.append(value)
-        # Normalize and apply age bounds
+
         if min_age > max_age:
             min_age, max_age = max_age, min_age
         where_clauses.append("age BETWEEN ? AND ?")
         params.extend([min_age, max_age])
+
+        if sample_1k:
+            if not os.path.exists(SAMPLE_1K_CSV_PATH):
+                raise HTTPException(status_code=503, detail=f"CSV 1k no disponible en ruta: {SAMPLE_1K_CSV_PATH}")
+            where_clauses.append('studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?))')
+            params.append(SAMPLE_1K_CSV_PATH)
+
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         query = base_select + where_sql
         with duckdb.connect(DB_PATH, read_only=True) as con:
@@ -236,7 +254,6 @@ def get_studies_count(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/studies/{study_id}/dicoms")
 def get_study_dicoms(study_id: str):
     """Return rows from the metadata Parquet for a given StudyInstanceUID (study_id).
