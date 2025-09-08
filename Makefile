@@ -71,10 +71,10 @@ build-db-local: ## Construir DuckDB localmente (requiere venv y deps instaladas)
 
 deploy-backend: ## Pull, install deps, and restart systemd service
 	cd /home/dolobos/DICOM_Viewer && \
-	git pull && \
-	. .venv/bin/activate && \
-	pip install -r backend/requirements.txt && \
-	sudo systemctl restart dicom-backend
+		git pull && \
+		. .venv/bin/activate && \
+		pip install -r backend/requirements.txt && \
+		sudo systemctl restart dicom-backend
 
 tunnel:
 	ssh -L 8000:localhost:8000 -L 5173:localhost:5173 $(USERHOST)
