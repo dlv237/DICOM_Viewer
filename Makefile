@@ -3,6 +3,7 @@
 SHELL := /bin/bash
 COMPOSE := docker compose
 DEV_FILES := -f docker-compose.yml -f docker-compose.dev.yml
+USERHOST ?= dolobos@maicolpue.ing.puc.cl
 
 # Default path to write the DuckDB file locally (can be overridden by setting DUCKDB_PATH env)
 DUCKDB_PATH ?= /mnt/nas_anakena/datasets/uc-cxr/processed_data/app.duckdb
@@ -69,9 +70,12 @@ build-db-local: ## Construir DuckDB localmente (requiere venv y deps instaladas)
 	PYTHONPATH=backend DUCKDB_PATH=${DUCKDB_PATH} python3 backend/app/load_data.py
 
 deploy-backend: ## Pull, install deps, and restart systemd service
-    cd /home/dolobos/DICOM_Viewer && \
-    git pull && \
-    . .venv/bin/activate && \
-    pip install -r backend/requirements.txt && \
-    sudo systemctl restart dicom-backend
-// ...existing code...
+	cd /home/dolobos/DICOM_Viewer && \
+	git pull && \
+	. .venv/bin/activate && \
+	pip install -r backend/requirements.txt && \
+	sudo systemctl restart dicom-backend
+
+tunnel:
+	ssh -L 8000:localhost:8000 -L 5173:localhost:5173 $(USERHOST)
+	$(USERHOST_PASSWORD)
