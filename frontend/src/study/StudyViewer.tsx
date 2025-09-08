@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import ImageViewer from './ImageViewer'
+import { Activity } from 'lucide-react'
 
 type Item = {
   StudyInstanceUID?: string
@@ -25,6 +26,8 @@ const StudyViewer: React.FC = () => {
 
   const base = "http://localhost:8000"
 
+  const navigate = useNavigate()
+
   useEffect(() => {
     const load = async () => {
       if (!id) return
@@ -34,6 +37,7 @@ const StudyViewer: React.FC = () => {
         const res = await fetch(`${base}/studies/${encodeURIComponent(id)}/dicoms`)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
+        console.log(data)
         setItems((data?.items as Item[]) || [])
       } catch (e: any) {
         setError(e?.message || 'Error')
@@ -45,11 +49,26 @@ const StudyViewer: React.FC = () => {
   }, [id, base])
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-      <div className="max-w-6xl mx-auto">
-        <h1 className="text-2xl font-bold mb-4">Study Viewer</h1>
-        <p className="text-slate-600 mb-6">StudyInstanceUID: {id}</p>
-
+    <div className="min-h-screen bg-slate-50">
+      <div className="bg-white shadow-sm border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-6 py-8">
+          <div className="flex items-center gap-3 mb-2">
+            <Activity className="h-8 w-8 text-blue-600" />
+            <h1 className="text-3xl font-bold text-slate-800">DICOM Viewer</h1>
+          </div>
+        </div>
+      </div>
+      <div className="max-w-6xl mx-auto md:px-6">
+        <div className='flex items-center justify-between mt-4'>
+          <button
+            className="mb-4 px-4 py-2 bg-slate-200 rounded hover:bg-slate-300"
+            onClick={() => navigate(-1)}
+          >
+            Volver
+          </button>
+          <p className="text-slate-600 mb-6">StudyInstanceUID: {id}</p>
+        </div>
+        
         {loading && <div>Cargando imágenes...</div>}
         {error && <div className="text-red-600">{error}</div>}
 
@@ -69,12 +88,14 @@ const StudyViewer: React.FC = () => {
                     </div>
                     {it.SOPInstanceUID && (
                       <div className="mt-3 flex gap-3">
-                        <button
-                          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
-                          onClick={() => it.SOPInstanceUID && setOpenedDicom(`${base}/dicoms/${encodeURIComponent(it.SOPInstanceUID)}`)}
-                        >
-                          Ver DICOM
-                        </button>
+                        {it.Modality !== 'SR' && (
+                          <button
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
+                            onClick={() => it.SOPInstanceUID && setOpenedDicom(`${base}/dicoms/${encodeURIComponent(it.SOPInstanceUID)}`)}
+                          >
+                            Ver DICOM
+                          </button>
+                        )}
                         <a
                           className="px-3 py-1 bg-slate-200 hover:bg-slate-300 rounded text-sm text-slate-800"
                           href={`${base}/dicoms/${encodeURIComponent(it.SOPInstanceUID)}`}

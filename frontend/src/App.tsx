@@ -2,26 +2,48 @@
 
 import { useEffect, useState } from "react"
 import { Search, Loader2, FileText, Activity, ChevronLeft, ChevronRight } from "lucide-react"
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 type Study = { studyId: string; cleanReportText?: string }
 type FindingValue = "Certainly True" | "Maybe True" | "Unknown" | "Maybe False" | "Certainly False"
 
 function App() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const params = new URLSearchParams(location.search)
   const [studies, setStudies] = useState<Study[]>([])
   const [loading, setLoading] = useState(true)
   const [filtering, setFiltering] = useState(false)
   const [findings, setFindings] = useState<string[]>([])
-  const [selectedFinding, setSelectedFinding] = useState<string>("")
-  const [selectedValue, setSelectedValue] = useState<FindingValue>("Certainly True")
+  const [selectedFinding, setSelectedFinding] = useState<string>(params.get("finding") || "")
+  const [selectedValue, setSelectedValue] = useState<FindingValue>(params.get("value") as FindingValue || "Certainly True")
   const [temporallySelectedValue, setTemporallySelectedValue] = useState<FindingValue>("Certainly True")
-  const [page, setPage] = useState(1)
+  const [page, setPage] = useState(Number(params.get("page")) || 1)
   const [pageSize] = useState(10)
   const [total, setTotal] = useState(0)
-  const [minAge, setMinAge] = useState<number>(18)
-  const [maxAge, setMaxAge] = useState<number>(100)
-  const [useSample1k, setUseSample1k] = useState<boolean>(false)
+  const [minAge, setMinAge] = useState<number>(params.get("min_age") ? Number(params.get("min_age")) : 18)
+  const [maxAge, setMaxAge] = useState<number>(params.get("max_age") ? Number(params.get("max_age")) : 100)
+  const [useSample1k, setUseSample1k] = useState<boolean>(params.get("sample_1k") === "true")
+
+  function setQueryParams(params: Record<string, string | number | boolean | undefined>) {
+    const search = new URLSearchParams(location.search)
+    Object.entries(params).forEach(([k, v]) => {
+      if (v === undefined) search.delete(k)
+      else search.set(k, String(v))
+    })
+    navigate({ search: search.toString() }, { replace: true })
+  }
+
+  useEffect(() => {
+    setQueryParams({
+      page,
+      finding: selectedFinding,
+      value: selectedValue,
+      min_age: minAge,
+      max_age: maxAge,
+      sample_1k: useSample1k,
+    })
+  }, [page, selectedFinding, selectedValue, minAge, maxAge, useSample1k])
 
   const fetchPage = async (
     pageNum = 1, 
@@ -83,7 +105,15 @@ function App() {
   const onFilter = async () => {
     setFiltering(true)
     try {
-  const { studiesData, total } = await fetchPage(1, selectedFinding || undefined, temporallySelectedValue, minAge, maxAge)
+      setQueryParams({
+        page: 1,
+        finding: selectedFinding,
+        value: temporallySelectedValue,
+        min_age: minAge,
+        max_age: maxAge,
+        sample_1k: useSample1k,
+      })
+      const { studiesData, total } = await fetchPage(1, selectedFinding || undefined, temporallySelectedValue, minAge, maxAge, useSample1k)
       setStudies(studiesData)
       setTotal(total)
       setPage(1)
@@ -99,6 +129,14 @@ function App() {
     if (pageNum === page || filtering) return
     setFiltering(true)
     try {
+      setQueryParams({
+        page: pageNum,
+        finding: selectedFinding,
+        value: selectedValue,
+        min_age: minAge,
+        max_age: maxAge,
+        sample_1k: useSample1k,
+      })
       const { studiesData } = await fetchPage(pageNum, selectedFinding || undefined, selectedValue, minAge, maxAge, useSample1k)
       setStudies(studiesData)
       setPage(pageNum)
@@ -163,7 +201,7 @@ function App() {
             Filtros de Búsqueda
           </h2>
 
-          <div className="grid md:grid-cols-5 gap-4 items-end">
+          <div className="grid md:grid-cols-6 gap-4 items-end">
             <div className="space-y-2">
               <label className="block text-sm font-medium text-slate-700">Hallazgo Médico</label>
               <select
@@ -205,32 +243,41 @@ function App() {
                 min={0}
                 value={minAge}
                 onChange={(e) => setMinAge(Number.isNaN(parseInt(e.target.value)) ? 0 : parseInt(e.target.value))}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
+                className="w-24 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
                 disabled={loading || filtering}
               />
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 -ml-16">
               <label className="block text-sm font-medium text-slate-700">Edad máxima</label>
               <input
                 type="number"
                 min={0}
                 value={maxAge}
                 onChange={(e) => setMaxAge(Number.isNaN(parseInt(e.target.value)) ? 0 : parseInt(e.target.value))}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
+                className="w-24 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
                 disabled={loading || filtering}
               />
             </div>
 
-            <div className="flex items-center gap-2 mb-2">
-              <input
-                id="useSample1k"
-                type="checkbox"
-                checked={useSample1k}
-                onChange={(e) => setUseSample1k(e.target.checked)}
-                disabled={loading || filtering}
-                className="h-4 w-4 text-blue-600 border-slate-300 rounded"
-              />
+            <div className="flex items-center gap-3 -ml-28">
+              <div
+                className={`relative inline-flex w-11 shrink-0 rounded-full p-0.5 transition-colors duration-200 ease-in-out
+                  ${useSample1k ? "bg-indigo-600" : "bg-gray-200"}`}
+              >
+                <span
+                  className={`size-5 rounded-full bg-white shadow-xs ring-1 ring-gray-900/5 transition-transform duration-200 ease-in-out
+                    ${useSample1k ? "translate-x-5" : ""}`}
+                />
+                <input
+                  id="useSample1k"
+                  type="checkbox"
+                  checked={useSample1k}
+                  onChange={(e) => setUseSample1k(e.target.checked)}
+                  disabled={loading || filtering}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+              </div>
               <label htmlFor="useSample1k" className="text-sm font-medium text-slate-700">
                 Revisar Sample de 1k para CentaurLabs
               </label>

@@ -68,4 +68,10 @@ build-db-local: ## Construir DuckDB localmente (requiere venv y deps instaladas)
 	@echo "Using DUCKDB_PATH=${DUCKDB_PATH}"
 	PYTHONPATH=backend DUCKDB_PATH=${DUCKDB_PATH} python3 backend/app/load_data.py
 
- 
+deploy-backend: ## Pull, install deps, and restart systemd service
+    cd /home/dolobos/DICOM_Viewer && \
+    git pull && \
+    . .venv/bin/activate && \
+    pip install -r backend/requirements.txt && \
+    sudo systemctl restart dicom-backend
+// ...existing code...
