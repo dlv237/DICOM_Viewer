@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 
 type Study = { studyId: string; cleanReportText?: string }
 type FindingValue = "Certainly True" | "Maybe True" | "Unknown" | "Maybe False" | "Certainly False"
+const ANY_IN_GROUP = "--All in group--"
 
 function App() {
   const navigate = useNavigate()
@@ -27,6 +28,7 @@ function App() {
   const [labelGroups, setLabelGroups] = useState<Record<string, string[]>>({})
   const [groups, setGroups] = useState<string[]>([])
   const [selectedGroup, setSelectedGroup] = useState<string>(params.get("label_group") || "")
+  
 
   function setQueryParams(qp: Record<string, string | number | boolean | undefined>) {
     const search = new URLSearchParams(location.search)
@@ -38,16 +40,17 @@ function App() {
   }
 
   useEffect(() => {
+    const effectiveFinding = selectedFinding === ANY_IN_GROUP ? undefined : selectedFinding
     setQueryParams({
       page,
-      finding: selectedFinding,
+      finding: effectiveFinding,
       value: selectedValue,
       min_age: minAge,
       max_age: maxAge,
       sample_1k: useSample1k,
-      label_group: selectedGroup || undefined,
+      label_group: useSample1k && selectedGroup ? selectedGroup : undefined,
     })
-  }, [page, selectedFinding, selectedValue, minAge, maxAge, useSample1k])
+  }, [page, selectedFinding, selectedValue, minAge, maxAge, useSample1k, selectedGroup])
 
   const fetchPage = async (
     pageNum = 1, 
@@ -67,7 +70,7 @@ function App() {
     params.set("sample_1k", sample ? "true" : "false")
     if (finding) params.set("hallazgo", finding)
     if (val) params.set("value", val)
-    if (group) params.set("label_group", group)
+    if (sample && group) params.set("label_group", group)
 
     const [studiesRes, countRes] = await Promise.all([
       fetch(`${base}/studies?${params.toString()}`),
@@ -93,7 +96,6 @@ function App() {
         const findingsRes = await fetch(`${base}/findings`)
         const findingsData: string[] = await findingsRes.json()
         findingsData.sort()
-        setFindings(findingsData)
 
         const lgRes = await fetch(`${base}/label_groups`)
         if (lgRes.ok) {
@@ -101,18 +103,32 @@ function App() {
           setGroups(lg.groups || [])
           setLabelGroups(lg.mapping || {})
         }
-        let chosen = selectedFinding || findingsData[0] || ""
+
+        let list = findingsData
         if (useSample1k && selectedGroup && labelGroups[selectedGroup]) {
           const groupLabels = new Set(labelGroups[selectedGroup])
-          const filtered = findingsData.filter(l => groupLabels.has(l))
-          if (filtered.length > 0) {
-            if (!filtered.includes(chosen)) chosen = filtered[0]
-            setFindings(filtered)
-          }
+          const filtered = findingsData.filter(l => groupLabels.has(l)).sort()
+          list = filtered.length ? [ANY_IN_GROUP, ...filtered] : filtered
+        }
+        setFindings(list)
+        
+        let chosen = selectedFinding
+        if (!chosen) chosen = list[0] || ""
+        if (useSample1k && selectedGroup && !list.includes(chosen)) {
+          chosen = list[0] || ""
         }
         if (!selectedFinding && chosen) setSelectedFinding(chosen)
 
-        const { studiesData, total } = await fetchPage(page, chosen || undefined, selectedValue, minAge, maxAge, useSample1k, selectedGroup || undefined)
+        const effectiveFinding = chosen === ANY_IN_GROUP ? undefined : chosen
+        const { studiesData, total } = await fetchPage(
+          page,
+          effectiveFinding,
+          selectedValue,
+          minAge,
+          maxAge,
+          useSample1k,
+          selectedGroup || undefined
+        )
         setStudies(studiesData)
         setTotal(total)
       } catch (e) {
@@ -142,32 +158,30 @@ function App() {
     }
     const groupLabels = new Set(labelGroups[selectedGroup] || [])
     if (groupLabels.size === 0) return
-    setFindings(prev => {
-      // Si prev ya está filtrado, mejor partimos de la unión con groupLabels y el conocimiento previo;
-      // para simplificar, volvemos a intersectar con el conjunto actual
-      const filtered = [...new Set(prev)].filter(l => groupLabels.has(l)).sort()
-      if (filtered.length > 0 && !filtered.includes(selectedFinding)) {
-        setSelectedFinding(filtered[0])
-      }
-      return filtered.length > 0 ? filtered : prev
-    })
+    const filtered = [...groupLabels].sort()
+    const withAny = [ANY_IN_GROUP, ...filtered]
+    setFindings(withAny)
+    if (!withAny.includes(selectedFinding)) {
+      setSelectedFinding(ANY_IN_GROUP) // por defecto, buscar todas del grupo
+    }
   }, [useSample1k, selectedGroup, labelGroups, selectedFinding])
 
   const onFilter = async () => {
     setFiltering(true)
     try {
+      const effectiveFinding = selectedFinding === ANY_IN_GROUP ? undefined : selectedFinding
       setQueryParams({
         page: 1,
-        finding: selectedFinding,
+        finding: effectiveFinding,
         value: temporallySelectedValue,
         min_age: minAge,
         max_age: maxAge,
         sample_1k: useSample1k,
-        label_group: selectedGroup || undefined,
+        label_group: useSample1k && selectedGroup ? selectedGroup : undefined,
       })
       const { studiesData, total } = await fetchPage(
         1,
-        selectedFinding || undefined,
+        effectiveFinding,
         temporallySelectedValue,
         minAge,
         maxAge,
@@ -189,18 +203,19 @@ function App() {
     if (pageNum === page || filtering) return
     setFiltering(true)
     try {
+      const effectiveFinding = selectedFinding === ANY_IN_GROUP ? undefined : selectedFinding
       setQueryParams({
         page: pageNum,
-        finding: selectedFinding,
+        finding: effectiveFinding,
         value: selectedValue,
         min_age: minAge,
         max_age: maxAge,
         sample_1k: useSample1k,
-        label_group: selectedGroup || undefined,
+        label_group: useSample1k && selectedGroup ? selectedGroup : undefined,
       })
       const { studiesData } = await fetchPage(
         pageNum,
-        selectedFinding || undefined,
+        effectiveFinding,
         selectedValue,
         minAge,
         maxAge,
