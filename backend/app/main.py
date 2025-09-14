@@ -310,7 +310,7 @@ def get_studies_count(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/label-groups")
+@app.get("/label_groups")
 def get_label_groups():
     try:
         mapping = _load_label_groups()

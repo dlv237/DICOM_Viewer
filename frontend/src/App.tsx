@@ -272,7 +272,7 @@ function App() {
 
           <div className="grid md:grid-cols-6 gap-4 items-end">
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-slate-700">Hallazgo Médico</label>
+              <label className="block text-sm font-medium text-slate-700">Finding</label>
               <select
                 value={selectedFinding}
                 onChange={(e) => setSelectedFinding(e.target.value)}
@@ -287,9 +287,9 @@ function App() {
               </select>
             </div>
 
-            <div className="space-y-2 md:col-span-2">
+            <div className="space-y-2">
               <label className={`block text-sm font-medium ${useSample1k ? "text-slate-700" : "text-slate-400"}`}>
-                Grupo de labels (Sample 1k)
+                Group labels (Sample 1k)
               </label>
               <select
                 value={useSample1k ? selectedGroup : ""}
@@ -297,7 +297,7 @@ function App() {
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900 disabled:bg-slate-100"
                 disabled={!useSample1k || loading || filtering}
               >
-                <option value="">Todos los grupos</option>
+                <option value="">All groups</option>
                 {groups.map((g) => (
                   <option key={g} value={g}>{g}</option>
                 ))}
@@ -323,7 +323,7 @@ function App() {
             </div>
 
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-slate-700">Edad mínima</label>
+              <label className="block text-sm font-medium text-slate-700">Min age</label>
               <input
                 type="number"
                 min={0}
@@ -335,7 +335,7 @@ function App() {
             </div>
 
             <div className="space-y-2 -ml-16">
-              <label className="block text-sm font-medium text-slate-700">Edad máxima</label>
+              <label className="block text-sm font-medium text-slate-700">Max age</label>
               <input
                 type="number"
                 min={0}
@@ -371,7 +371,7 @@ function App() {
                 />
               </div>
               <label htmlFor="useSample1k" className="text-sm font-medium text-slate-700">
-                Revisar Sample de 1k para CentaurLabs
+                Use Sample 1k only
               </label>
             </div>
 
@@ -383,12 +383,12 @@ function App() {
               {filtering ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Buscando...
+                  Searching...
                 </>
               ) : (
                 <>
                   <Search className="h-4 w-4" />
-                  Filtrar
+                  Filter
                 </>
               )}
             </button>
