@@ -19,6 +19,12 @@ SAMPLE_1K_CSV_PATH = os.environ.get(
     "SAMPLE_1K_CSV_PATH",
     "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm/sample_1k_for_centaurlabs.csv",
 )
+# CSV de grupos (Label -> Group)
+LABEL_GROUPS_CSV_PATH = os.environ.get(
+    "LABEL_GROUPS_CSV_PATH",
+    "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm/label_freq_summary_1.csv",
+)
+
 app = FastAPI(title="DICOM Viewer API", version="0.1.0")
 
 app.add_middleware(
@@ -119,6 +125,45 @@ def _map_real_to_anon_study_uid(real_uid: str) -> str | None:
         return None
     except Exception:
         return None
+    
+def _load_label_groups() -> dict[str, list[str]]:
+    """
+    Retorna mapping {group: [labels...]}.
+    Prioriza LABEL_GROUPS_CSV_PATH; si no existe, deriva de SAMPLE_1K_CSV_PATH.
+    """
+    mapping: dict[str, list[str]] = {}
+    if os.path.exists(LABEL_GROUPS_CSV_PATH):
+        # Usar DuckDB para leer CSV y agrupar
+        sql = """
+            SELECT "Group" AS grp, LIST(DISTINCT "Label") AS labels
+            FROM read_csv_auto(?, header=True)
+            GROUP BY grp
+        """
+        try:
+            with duckdb.connect(database=":memory:") as con:
+                rows = con.execute(sql, [LABEL_GROUPS_CSV_PATH]).fetchall()
+                for grp, labels in rows:
+                    if grp and isinstance(labels, list):
+                        mapping[str(grp)] = [str(x) for x in labels]
+                return mapping
+        except Exception:
+            pass
+    # Fallback: deducir desde sample 1k
+    if os.path.exists(SAMPLE_1K_CSV_PATH):
+        sql = """
+            SELECT "group" AS grp, LIST(DISTINCT "label") AS labels
+            FROM read_csv_auto(?, header=True)
+            GROUP BY grp
+        """
+        try:
+            with duckdb.connect(database=":memory:") as con:
+                rows = con.execute(sql, [SAMPLE_1K_CSV_PATH]).fetchall()
+                for grp, labels in rows:
+                    if grp and isinstance(labels, list):
+                        mapping[str(grp)] = [str(x) for x in labels]
+        except Exception:
+            pass
+    return mapping
 
 @app.get("/findings")
 def get_findings():
@@ -179,16 +224,18 @@ def get_studies(
     page: int = Query(default=1, ge=1, description="Número de página (1-indexed)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Cantidad de resultados por página"),
     sample_1k: bool = Query(default=False, description="Limitar a los studyID del CSV de sample 1k"),
+    label_group: str | None = Query(default=None, description="Filtrar a los studyID cuyo group en el CSV 1k coincida"),
 ):
     # Normalize age bounds
     if min_age > max_age:
         min_age, max_age = max_age, min_age
-    # ...existing code...
+
     base_select = (
         "SELECT studyID AS studyId, MIN(clean_report_text) AS cleanReportText FROM reports"
     )
     params: list = []
     where_clauses = ["studyID IS NOT NULL"]
+
     if hallazgo is not None and value is not None:
         valid_cols = set(_finding_columns())
         if hallazgo not in valid_cols:
@@ -200,14 +247,17 @@ def get_studies(
     where_clauses.append("age BETWEEN ? AND ?")
     params.extend([min_age, max_age])
 
-    # Sample 1k filter
+    # Sample 1k filter (IDs presentes en CSV de 1k)
     if sample_1k:
         if not os.path.exists(SAMPLE_1K_CSV_PATH):
             raise HTTPException(status_code=503, detail=f"CSV 1k no disponible en ruta: {SAMPLE_1K_CSV_PATH}")
         where_clauses.append('studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?))')
         params.append(SAMPLE_1K_CSV_PATH)
+        # Si además hay filtro de grupo, restringir por group exacto
+        if label_group:
+            where_clauses[-1] = 'studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?) WHERE "group" = ?)'
+            params.append(label_group)
 
-    # Stable ordering helps consistent pagination
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     query = base_select + where_sql + " GROUP BY studyID ORDER BY studyID LIMIT ? OFFSET ?"
     params.extend([page_size, (page - 1) * page_size])
@@ -222,11 +272,13 @@ def get_studies_count(
     min_age: int = Query(default=18, ge=0, description="Edad mínima inclusiva"),
     max_age: int = Query(default=100, ge=0, description="Edad máxima inclusiva"),
     sample_1k: bool = Query(default=False, description="Limitar a los studyID del CSV de sample 1k"),
+    label_group: str | None = Query(default=None, description="Filtrar a los studyID cuyo group en el CSV 1k coincida"),
 ):
     try:
         base_select = "SELECT COUNT(DISTINCT studyID) FROM reports"
         params: list = []
         where_clauses = ["studyID IS NOT NULL"]
+
         if hallazgo is not None and value is not None:
             valid_cols = set(_finding_columns())
             if hallazgo not in valid_cols:
@@ -244,6 +296,9 @@ def get_studies_count(
                 raise HTTPException(status_code=503, detail=f"CSV 1k no disponible en ruta: {SAMPLE_1K_CSV_PATH}")
             where_clauses.append('studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?))')
             params.append(SAMPLE_1K_CSV_PATH)
+            if label_group:
+                where_clauses[-1] = 'studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?) WHERE "group" = ?)'
+                params.append(label_group)
 
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         query = base_select + where_sql
@@ -254,6 +309,16 @@ def get_studies_count(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/label-groups")
+def get_label_groups():
+    try:
+        mapping = _load_label_groups()
+        groups = sorted(mapping.keys())
+        return {"groups": groups, "mapping": mapping}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/studies/{study_id}/dicoms")
 def get_study_dicoms(study_id: str):
     """Return rows from the metadata Parquet for a given StudyInstanceUID (study_id).

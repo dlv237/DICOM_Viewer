@@ -24,11 +24,14 @@ function App() {
   const [minAge, setMinAge] = useState<number>(params.get("min_age") ? Number(params.get("min_age")) : 18)
   const [maxAge, setMaxAge] = useState<number>(params.get("max_age") ? Number(params.get("max_age")) : 100)
   const [useSample1k, setUseSample1k] = useState<boolean>(params.get("sample_1k") === "true")
+  const [labelGroups, setLabelGroups] = useState<Record<string, string[]>>({})
+  const [groups, setGroups] = useState<string[]>([])
+  const [selectedGroup, setSelectedGroup] = useState<string>(params.get("label_group") || "")
 
-  function setQueryParams(params: Record<string, string | number | boolean | undefined>) {
+  function setQueryParams(qp: Record<string, string | number | boolean | undefined>) {
     const search = new URLSearchParams(location.search)
-    Object.entries(params).forEach(([k, v]) => {
-      if (v === undefined) search.delete(k)
+    Object.entries(qp).forEach(([k, v]) => {
+      if (v === undefined || v === "" || v === false) search.delete(k)
       else search.set(k, String(v))
     })
     navigate({ search: search.toString() }, { replace: true })
@@ -42,6 +45,7 @@ function App() {
       min_age: minAge,
       max_age: maxAge,
       sample_1k: useSample1k,
+      label_group: selectedGroup || undefined,
     })
   }, [page, selectedFinding, selectedValue, minAge, maxAge, useSample1k])
 
@@ -52,6 +56,7 @@ function App() {
     minA: number = minAge, 
     maxA: number = maxAge,
     sample: boolean = useSample1k,
+    group?: string
   ) => {
     const base = "http://localhost:8000"
     const params = new URLSearchParams()
@@ -62,6 +67,7 @@ function App() {
     params.set("sample_1k", sample ? "true" : "false")
     if (finding) params.set("hallazgo", finding)
     if (val) params.set("value", val)
+    if (group) params.set("label_group", group)
 
     const [studiesRes, countRes] = await Promise.all([
       fetch(`${base}/studies?${params.toString()}`),
@@ -72,6 +78,7 @@ function App() {
         paramsCount.set("min_age", String(minA))
         paramsCount.set("max_age", String(maxA))
         paramsCount.set("sample_1k", sample ? "true" : "false")
+        if (group && sample) paramsCount.set("label_group", group)
         return fetch(`${base}/studies/count?${paramsCount.toString()}`)
       })(),
     ])
@@ -85,12 +92,27 @@ function App() {
         const base = "http://localhost:8000"
         const findingsRes = await fetch(`${base}/findings`)
         const findingsData: string[] = await findingsRes.json()
+        findingsData.sort()
         setFindings(findingsData)
 
-        const chosen = selectedFinding || findingsData[0] || ""
+        const lgRes = await fetch(`${base}/label_groups`)
+        if (lgRes.ok) {
+          const lg = await lgRes.json() as { groups: string[]; mapping: Record<string, string[]> }
+          setGroups(lg.groups || [])
+          setLabelGroups(lg.mapping || {})
+        }
+        let chosen = selectedFinding || findingsData[0] || ""
+        if (useSample1k && selectedGroup && labelGroups[selectedGroup]) {
+          const groupLabels = new Set(labelGroups[selectedGroup])
+          const filtered = findingsData.filter(l => groupLabels.has(l))
+          if (filtered.length > 0) {
+            if (!filtered.includes(chosen)) chosen = filtered[0]
+            setFindings(filtered)
+          }
+        }
         if (!selectedFinding && chosen) setSelectedFinding(chosen)
 
-        const { studiesData, total } = await fetchPage(page, chosen || undefined, selectedValue, minAge, maxAge, useSample1k)
+        const { studiesData, total } = await fetchPage(page, chosen || undefined, selectedValue, minAge, maxAge, useSample1k, selectedGroup || undefined)
         setStudies(studiesData)
         setTotal(total)
       } catch (e) {
@@ -102,6 +124,35 @@ function App() {
     load()
   }, [])
 
+  useEffect(() => {
+    if (!useSample1k) return
+    if (!selectedGroup) {
+      // restaurar lista completa original: pedir /findings de nuevo
+      (async () => {
+        try {
+          const base = "http://localhost:8000"
+          const res = await fetch(`${base}/findings`)
+          const all: string[] = await res.json()
+          all.sort()
+          setFindings(all)
+          if (!all.includes(selectedFinding)) setSelectedFinding(all[0] || "")
+        } catch {}
+      })()
+      return
+    }
+    const groupLabels = new Set(labelGroups[selectedGroup] || [])
+    if (groupLabels.size === 0) return
+    setFindings(prev => {
+      // Si prev ya está filtrado, mejor partimos de la unión con groupLabels y el conocimiento previo;
+      // para simplificar, volvemos a intersectar con el conjunto actual
+      const filtered = [...new Set(prev)].filter(l => groupLabels.has(l)).sort()
+      if (filtered.length > 0 && !filtered.includes(selectedFinding)) {
+        setSelectedFinding(filtered[0])
+      }
+      return filtered.length > 0 ? filtered : prev
+    })
+  }, [useSample1k, selectedGroup, labelGroups, selectedFinding])
+
   const onFilter = async () => {
     setFiltering(true)
     try {
@@ -112,8 +163,17 @@ function App() {
         min_age: minAge,
         max_age: maxAge,
         sample_1k: useSample1k,
+        label_group: selectedGroup || undefined,
       })
-      const { studiesData, total } = await fetchPage(1, selectedFinding || undefined, temporallySelectedValue, minAge, maxAge, useSample1k)
+      const { studiesData, total } = await fetchPage(
+        1,
+        selectedFinding || undefined,
+        temporallySelectedValue,
+        minAge,
+        maxAge,
+        useSample1k,
+        selectedGroup || undefined,
+      )
       setStudies(studiesData)
       setTotal(total)
       setPage(1)
@@ -136,8 +196,17 @@ function App() {
         min_age: minAge,
         max_age: maxAge,
         sample_1k: useSample1k,
+        label_group: selectedGroup || undefined,
       })
-      const { studiesData } = await fetchPage(pageNum, selectedFinding || undefined, selectedValue, minAge, maxAge, useSample1k)
+      const { studiesData } = await fetchPage(
+        pageNum,
+        selectedFinding || undefined,
+        selectedValue,
+        minAge,
+        maxAge,
+        useSample1k,
+        selectedGroup || undefined,
+      )
       setStudies(studiesData)
       setPage(pageNum)
     } finally {
@@ -218,6 +287,23 @@ function App() {
               </select>
             </div>
 
+            <div className="space-y-2 md:col-span-2">
+              <label className={`block text-sm font-medium ${useSample1k ? "text-slate-700" : "text-slate-400"}`}>
+                Grupo de labels (Sample 1k)
+              </label>
+              <select
+                value={useSample1k ? selectedGroup : ""}
+                onChange={(e) => setSelectedGroup(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900 disabled:bg-slate-100"
+                disabled={!useSample1k || loading || filtering}
+              >
+                <option value="">Todos los grupos</option>
+                {groups.map((g) => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
+            </div>
+
             <div className="space-y-2">
               <label className="block text-sm font-medium text-slate-700">Valor de Certeza</label>
               <select
@@ -273,7 +359,13 @@ function App() {
                   id="useSample1k"
                   type="checkbox"
                   checked={useSample1k}
-                  onChange={(e) => setUseSample1k(e.target.checked)}
+                  onChange={(e) => {
+                    const v = e.target.checked
+                    setUseSample1k(v)
+                    if (!v) {
+                      setSelectedGroup("")
+                    }
+                  }}
                   disabled={loading || filtering}
                   className="absolute inset-0 opacity-0 cursor-pointer"
                 />
