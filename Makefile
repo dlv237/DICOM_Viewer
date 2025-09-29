@@ -4,11 +4,13 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 DEV_FILES := -f docker-compose.yml -f docker-compose.dev.yml
 USERHOST ?= dolobos@maicolpue.ing.puc.cl
+FRONTEND_PORT ?= 5173
 
 # Default path to write the DuckDB file locally (can be overridden by setting DUCKDB_PATH env)
 DUCKDB_PATH ?= /mnt/nas_anakena/datasets/uc-cxr/processed_data/app.duckdb
 
-.PHONY: help build rebuild up down clean logs ps restart dev dev-down backend-shell frontend-shell smoke install-frontend run-frontend run-backend build-db build-db-local
+.PHONY: help build rebuild up down clean logs ps restart dev dev-down backend-shell frontend-shell smoke install-frontend run-frontend run-backend build-db build-db-local deploy-backend tunnel \
+	frontend-pm2-start frontend-pm2-restart frontend-pm2-logs frontend-pm2-stop
 
 help: ## Mostrar esta ayuda
 	@echo "Comandos disponibles:" && \
@@ -78,25 +80,22 @@ deploy-backend: ## Pull, install deps, and restart systemd service
 
 tunnel:
 	ssh -L 8000:localhost:8000 -L 5173:localhost:5173 $(USERHOST)
-	$(USERHOST_PASSWORD)
-
 
 FRONTEND_PORT ?= 5173
 
 .PHONY: frontend-pm2-start frontend-pm2-restart frontend-pm2-logs frontend-pm2-stop
 
 frontend-pm2-start: ## Build y levantar frontend en pm2 (vite preview)
-    cd frontend && npm ci && npm run build
-    pm2 start npm --name dicom-frontend -- run preview -- --host 0.0.0.0 --port $(FRONTEND_PORT)
-    pm2 save
+	cd frontend && npm ci && npm run build
+	pm2 start npm --name dicom-frontend -- run preview -- --host 0.0.0.0 --port $(FRONTEND_PORT)
+	pm2 save
 
 frontend-pm2-restart: ## Reiniciar (o crear si no existe) el frontend en pm2
-    pm2 restart dicom-frontend || $(MAKE) frontend-pm2-start
+	pm2 restart dicom-frontend || $(MAKE) frontend-pm2-start
 
 frontend-pm2-logs: ## Ver logs del frontend en pm2
-    pm2 logs dicom-frontend
+	pm2 logs dicom-frontend
 
 frontend-pm2-stop: ## Detener y borrar proceso pm2 del frontend
-    -pm2 stop dicom-frontend
-    -pm2 delete dicom-frontend
-# ...existing code...
+	-pm2 stop dicom-frontend
+	-pm2 delete dicom-frontend
