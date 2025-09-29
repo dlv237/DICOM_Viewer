@@ -80,7 +80,10 @@ tunnel:
 	ssh -L 8000:localhost:8000 -L 5173:localhost:5173 $(USERHOST)
 	$(USERHOST_PASSWORD)
 
+
 FRONTEND_PORT ?= 5173
+
+.PHONY: frontend-pm2-start frontend-pm2-restart frontend-pm2-logs frontend-pm2-stop
 
 frontend-pm2-start: ## Build y levantar frontend en pm2 (vite preview)
     cd frontend && npm ci && npm run build
@@ -96,3 +99,4 @@ frontend-pm2-logs: ## Ver logs del frontend en pm2
 frontend-pm2-stop: ## Detener y borrar proceso pm2 del frontend
     -pm2 stop dicom-frontend
     -pm2 delete dicom-frontend
+# ...existing code...
