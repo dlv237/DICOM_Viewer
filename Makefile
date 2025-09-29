@@ -80,6 +80,8 @@ tunnel:
 	ssh -L 8000:localhost:8000 -L 5173:localhost:5173 $(USERHOST)
 	$(USERHOST_PASSWORD)
 
+FRONTEND_PORT ?= 5173
+
 frontend-pm2-start: ## Build y levantar frontend en pm2 (vite preview)
     cd frontend && npm ci && npm run build
     pm2 start npm --name dicom-frontend -- run preview -- --host 0.0.0.0 --port $(FRONTEND_PORT)
