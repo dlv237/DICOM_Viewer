@@ -87,11 +87,11 @@ FRONTEND_PORT ?= 5173
 
 frontend-pm2-start: ## Build y levantar frontend en pm2 (vite preview)
 	cd frontend && npm ci && npm run build
-	pm2 start npm --name dicom-frontend -- run preview -- --host 0.0.0.0 --port $(FRONTEND_PORT)
+	pm2 start npm --name dicom-frontend --cwd ./frontend -- run preview -- --host 0.0.0.0 --port $(FRONTEND_PORT)
 	pm2 save
 
 frontend-pm2-restart: ## Reiniciar (o crear si no existe) el frontend en pm2
-	pm2 restart dicom-frontend || $(MAKE) frontend-pm2-start
+	pm2 restart dicom-frontend || ( $(MAKE) frontend-pm2-start )
 
 frontend-pm2-logs: ## Ver logs del frontend en pm2
 	pm2 logs dicom-frontend
@@ -99,3 +99,8 @@ frontend-pm2-logs: ## Ver logs del frontend en pm2
 frontend-pm2-stop: ## Detener y borrar proceso pm2 del frontend
 	-pm2 stop dicom-frontend
 	-pm2 delete dicom-frontend
+
+frontend-pm2-static: ## Servir build estático con 'serve'
+	cd frontend && npm ci && npm run build
+	pm2 start serve --name dicom-frontend --frontend/dist --single --listen $(FRONTEND_PORT)
+	pm2 save
