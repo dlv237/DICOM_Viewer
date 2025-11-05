@@ -25,6 +25,12 @@ LABEL_GROUPS_CSV_PATH = os.environ.get(
     "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm/label_freq_summary_1.csv",
 )
 
+# Base CSVs for textual info per StudyID
+CSV_BASE_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm"
+FINDINGS_CSV = os.path.join(CSV_BASE_PATH, "100k_llm_findings_labels.csv")
+SECTIONS_CSV = os.path.join(CSV_BASE_PATH, "sections_of_report.csv")
+SENTENCES_CSV = os.path.join(CSV_BASE_PATH, "labels_per_sentence_5k.csv")
+
 app = FastAPI(title="DICOM Viewer API", version="0.1.0")
 
 app.add_middleware(
@@ -71,6 +77,14 @@ def _query_parquet(sql: str, params: List[Any]) -> List[Dict[str, Any]]:
         # Using in-memory db is fine; read_parquet will lazy-scan from disk
         cur = con.execute(sql, params)
         # Build dicts from cursor description + rows
+        col_names = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        return [dict(zip(col_names, r)) for r in rows]
+
+def _query_csv(sql: str, params: List[Any]) -> List[Dict[str, Any]]:
+    """Execute a DuckDB SQL over CSV files via read_csv_auto and return list of dicts."""
+    with duckdb.connect(database=":memory:") as con:
+        cur = con.execute(sql, params)
         col_names = [d[0] for d in cur.description]
         rows = cur.fetchall()
         return [dict(zip(col_names, r)) for r in rows]
@@ -412,6 +426,93 @@ def list_dicom_studies(limit: int = Query(default=10, ge=1, le=100)):
         sql = f'SELECT DISTINCT {select_expr} FROM read_parquet(?) WHERE "{uid_col}" IS NOT NULL LIMIT ?'
         rows = _query_parquet(sql, [DICOM_METADATA_PARQUET_PATH, limit])
         return {"uidColumn": uid_col, "items": rows}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/studies/{study_id}/text-info")
+def get_study_text_info(study_id: str):
+    """Return textual information assembled from CSVs for a given studyID.
+
+    Sources:
+    - 100k_llm_findings_labels.csv: general findings row + label statuses
+    - sections_of_report.csv: projections, history, finding_sentences_* fields
+    - labels_per_sentence_5k.csv: per-sentence annotations
+    """
+    try:
+        if not (os.path.exists(FINDINGS_CSV) and os.path.exists(SECTIONS_CSV) and os.path.exists(SENTENCES_CSV)):
+            missing = [p for p in (FINDINGS_CSV, SECTIONS_CSV, SENTENCES_CSV) if not os.path.exists(p)]
+            raise HTTPException(status_code=503, detail=f"CSV(s) faltantes: {', '.join(missing)}")
+
+        # Findings row and label statuses
+        # Discover columns to identify label columns (exclude known metadata fields)
+        desc = _query_csv("DESCRIBE SELECT * FROM read_csv_auto(?, header=True) LIMIT 0", [FINDINGS_CSV])
+        all_cols = [c.get("column_name") for c in desc if isinstance(c, dict)]
+        meta_cols = {
+            'clean_report_text', 'studyID', 'age', 'views', 'study_date',
+            'regex_labels', 'report_text', 'report_path', 'llm_labels'
+        }
+        label_cols = [c for c in all_cols if c and c not in meta_cols]
+
+        findings_sql = 'SELECT * FROM read_csv_auto(?, header=True) WHERE "studyID" = ? LIMIT 1'
+        f_rows = _query_csv(findings_sql, [FINDINGS_CSV, study_id])
+        findings_block: Dict[str, Any] | None = None
+        if f_rows:
+            row = f_rows[0]
+            findings_block = {
+                "study_date": row.get("study_date"),
+                "age": row.get("age"),
+                "report_text": row.get("report_text"),
+                "regex_labels": row.get("regex_labels"),
+                "llm_labels": row.get("llm_labels"),
+            }
+            # Build label_status by collecting non-null values among label_cols
+            label_status: Dict[str, Any] = {}
+            for col in label_cols:
+                val = row.get(col)
+                if val is not None and val != "":
+                    label_status[col] = val
+            findings_block["label_status"] = label_status
+
+        # Sections
+        sections_sql = 'SELECT * FROM read_csv_auto(?, header=True) WHERE "studyID" = ? LIMIT 1'
+        s_rows = _query_csv(sections_sql, [SECTIONS_CSV, study_id])
+        sections_block: Dict[str, Any] | None = None
+        if s_rows:
+            s = s_rows[0]
+            sections_block = {
+                "projections": s.get("projections"),
+                "history": s.get("history"),
+                "finding_sentences_es": s.get("finding_sentences_es"),
+                "finding_sentences_en": s.get("finding_sentences_en"),
+            }
+
+        # Sentences
+        sentences_sql = 'SELECT * FROM read_csv_auto(?, header=True) WHERE "studyID" = ?'
+        sent_rows = _query_csv(sentences_sql, [SENTENCES_CSV, study_id])
+        # sort by sentence_index if present
+        if sent_rows and 'sentence_index' in sent_rows[0]:
+            try:
+                sent_rows.sort(key=lambda r: (r.get('sentence_index') is None, r.get('sentence_index')))
+            except Exception:
+                pass
+        sentences = [
+            {
+                "sentence_index": r.get("sentence_index"),
+                "sentence_text": r.get("sentence_text"),
+                "positive_or_not": r.get("positive_or_not"),
+                "findings_affirmed": r.get("findings_affirmed"),
+            }
+            for r in sent_rows
+        ]
+
+        return {
+            "studyId": study_id,
+            "findings": findings_block,
+            "sections": sections_block,
+            "sentences": sentences,
+        }
     except HTTPException:
         raise
     except Exception as e:
