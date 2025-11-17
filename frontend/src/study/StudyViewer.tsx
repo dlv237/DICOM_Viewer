@@ -36,8 +36,8 @@ type StudyTextInfo = {
   sentences?: Array<{
     sentence_index?: number | null
     sentence_text?: string | null
-    positive_or_not?: string | null
-    findings_affirmed?: string | null
+    label?: string | null
+    group?: string | null
   }>
 }
 
@@ -180,8 +180,8 @@ const StudyViewer: React.FC = () => {
                       <li key={i} className="py-2 text-sm">
                         <div className="text-slate-500">Índice: {s.sentence_index ?? '-'}</div>
                         <div className="whitespace-pre-wrap break-words text-slate-800">{s.sentence_text || '-'}</div>
-                        <div className="text-slate-700"><span className="text-slate-500">Positiva:</span> {s.positive_or_not || '-'}</div>
-                        <div className="text-slate-700"><span className="text-slate-500">Findings afirmados:</span> {s.findings_affirmed || '-'}</div>
+                        <div className="text-slate-700"><span className="text-slate-500">Label:</span> {s.label || '-'}</div>
+                        <div className="text-slate-700"><span className="text-slate-500">Grupo:</span> {s.group || '-'}</div>
                       </li>
                     ))}
                   </ul>
