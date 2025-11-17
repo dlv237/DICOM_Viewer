@@ -396,35 +396,6 @@ function App() {
               />
             </div>
 
-            <div className="flex items-center gap-3 -ml-28">
-              <div
-                className={`relative inline-flex w-11 shrink-0 rounded-full p-0.5 transition-colors duration-200 ease-in-out
-                  ${useSample1k ? "bg-indigo-600" : "bg-gray-200"}`}
-              >
-                <span
-                  className={`size-5 rounded-full bg-white shadow-xs ring-1 ring-gray-900/5 transition-transform duration-200 ease-in-out
-                    ${useSample1k ? "translate-x-5" : ""}`}
-                />
-                <input
-                  id="useSample1k"
-                  type="checkbox"
-                  checked={useSample1k}
-                  onChange={(e) => {
-                    const v = e.target.checked
-                    setUseSample1k(v)
-                    if (!v) {
-                      setSelectedGroup("")
-                    }
-                  }}
-                  disabled={loading || filtering || !!searchId.trim()}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                />
-              </div>
-              <label htmlFor="useSample1k" className="text-sm font-medium text-slate-700">
-                Use Sample 1k only
-              </label>
-            </div>
-
             <button
               onClick={onFilter}
               disabled={loading || filtering}
