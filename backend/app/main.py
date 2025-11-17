@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import duckdb
 from pydantic import BaseModel
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from fastapi.responses import FileResponse
 
 DB_PATH = "/home/dolobos/DICOM_Viewer/app.duckdb"
@@ -27,7 +27,7 @@ LABEL_GROUPS_CSV_PATH = os.environ.get(
 
 # Base CSVs for textual info per StudyID
 CSV_BASE_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm"
-FINDINGS_CSV = os.path.join(CSV_BASE_PATH,"legacy_deprecated_data", "100k_llm_findings_labels.csv")
+FINDINGS_CSV = os.path.join(CSV_BASE_PATH, "100k_llm_findings_labels.csv")
 SECTIONS_CSV = os.path.join(CSV_BASE_PATH, "sections_of_report.csv")
 SENTENCES_CSV = os.path.join(CSV_BASE_PATH, "labels_per_sentence_mapped.csv")
 
@@ -56,16 +56,33 @@ async def health():
 def _quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
+def _csv_columns(csv_path: str) -> list[str]:
+    """Return list of columns for a CSV using DuckDB DESCRIBE."""
+    if not os.path.exists(csv_path):
+        return []
+    try:
+        rows = _query_csv("DESCRIBE SELECT * FROM read_csv_auto(?, header=True) LIMIT 0", [csv_path])
+        return [r.get("column_name") for r in rows if isinstance(r, dict) and r.get("column_name")]
+    except Exception:
+        return []
+
+
+def _detect_uid_col_in_csv(csv_path: str) -> Optional[str]:
+    """Detect UID/id column in a CSV among common candidates."""
+    cols = set(_csv_columns(csv_path))
+    return _find_col(cols, ["StudyInstanceUID", "studyInstanceUID", "StudyID", "studyID"])
+
+
 def _finding_columns() -> list[str]:
-    # Discover columns in 'reports' that correspond to findings (exclude metadata columns)
+    """Discover columns in findings CSV that correspond to findings (exclude metadata/uid)."""
+    cols = set(_csv_columns(FINDINGS_CSV))
+    uid_col = _detect_uid_col_in_csv(FINDINGS_CSV)
     meta_cols = {
-        'clean_report_text', 'studyID', 'age', 'views', 'study_date',
-        'regex_labels', 'report_text', 'report_path', 'llm_labels'
+        'clean_report_text', 'studyID', 'StudyID', 'StudyInstanceUID', 'studyInstanceUID',
+        'age', 'views', 'study_date', 'regex_labels', 'report_text', 'report_path', 'llm_labels'
     }
-    with duckdb.connect(DB_PATH, read_only=True) as con:
-        rows = con.execute("PRAGMA table_info('reports')").fetchall()
-    # rows: (cid, name, type, notnull, dflt_value, pk)
-    cols = [r[1] for r in rows]
+    if uid_col:
+        meta_cols.add(uid_col)
     return [c for c in cols if c not in meta_cols]
 
 def _query_parquet(sql: str, params: List[Any]) -> List[Dict[str, Any]]:
@@ -237,47 +254,51 @@ def get_studies(
     max_age: int = Query(default=100, ge=0, description="Edad máxima inclusiva"),
     page: int = Query(default=1, ge=1, description="Número de página (1-indexed)"),
     page_size: int = Query(default=20, ge=1, le=100, description="Cantidad de resultados por página"),
-    sample_1k: bool = Query(default=False, description="Limitar a los studyID del CSV de sample 1k"),
-    label_group: str | None = Query(default=None, description="Filtrar a los studyID cuyo group en el CSV 1k coincida"),
+    sample_1k: bool = Query(default=False, description="Limitar a los StudyInstanceUID presentes en sample 1k"),
+    label_group: str | None = Query(default=None, description="Filtrar a los UID cuyo group en el CSV 1k coincida"),
 ):
     # Normalize age bounds
     if min_age > max_age:
         min_age, max_age = max_age, min_age
 
-    base_select = (
-        "SELECT studyID AS studyId, MIN(clean_report_text) AS cleanReportText FROM reports"
-    )
-    params: list = []
-    where_clauses = ["studyID IS NOT NULL"]
+    uid_col = _detect_uid_col_in_csv(FINDINGS_CSV) or "StudyInstanceUID"
+    # Choose a text column to preview
+    cols = set(_csv_columns(FINDINGS_CSV))
+    text_col = "clean_report_text" if "clean_report_text" in cols else ("report_text" if "report_text" in cols else None)
+
+    base_select = f'SELECT "{uid_col}" AS studyId' + (f', MIN("{text_col}") AS cleanReportText' if text_col else ', NULL AS cleanReportText') + ' FROM read_csv_auto(?, header=True)'
+    params: list = [FINDINGS_CSV]
+    where_clauses = [f'"{uid_col}" IS NOT NULL']
 
     if hallazgo is not None and value is not None:
         valid_cols = set(_finding_columns())
         if hallazgo not in valid_cols:
             raise HTTPException(status_code=400, detail=f"Hallazgo desconocido: {hallazgo}")
-        where_clauses.append(f"{_quote_ident(hallazgo)} = ?")
+        where_clauses.append(f'{_quote_ident(hallazgo)} = ?')
         params.append(value)
 
     # Age range filter (inclusive)
-    where_clauses.append("age BETWEEN ? AND ?")
-    params.extend([min_age, max_age])
+    if "age" in cols:
+        where_clauses.append("age BETWEEN ? AND ?")
+        params.extend([min_age, max_age])
 
     # Sample 1k filter (IDs presentes en CSV de 1k)
     if sample_1k:
         if not os.path.exists(SAMPLE_1K_CSV_PATH):
             raise HTTPException(status_code=503, detail=f"CSV 1k no disponible en ruta: {SAMPLE_1K_CSV_PATH}")
-        where_clauses.append('studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?))')
-        params.append(SAMPLE_1K_CSV_PATH)
-        # Si además hay filtro de grupo, restringir por group exacto
+        s_uid = _detect_uid_col_in_csv(SAMPLE_1K_CSV_PATH) or "StudyInstanceUID"
         if label_group:
-            where_clauses[-1] = 'studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?) WHERE "group" = ?)'
-            params.append(label_group)
+            where_clauses.append(f'"{uid_col}" IN (SELECT DISTINCT "{s_uid}" FROM read_csv_auto(?, header=True) WHERE "group" = ?)')
+            params.extend([SAMPLE_1K_CSV_PATH, label_group])
+        else:
+            where_clauses.append(f'"{uid_col}" IN (SELECT DISTINCT "{s_uid}" FROM read_csv_auto(?, header=True))')
+            params.append(SAMPLE_1K_CSV_PATH)
 
     where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
-    query = base_select + where_sql + " GROUP BY studyID ORDER BY studyID LIMIT ? OFFSET ?"
+    query = base_select + where_sql + f' GROUP BY "{uid_col}" ORDER BY "{uid_col}" LIMIT ? OFFSET ?'
     params.extend([page_size, (page - 1) * page_size])
-    with duckdb.connect(DB_PATH, read_only=True) as con:
-        rows = con.execute(query, params).fetchall()
-    return [{"studyId": r[0], "cleanReportText": r[1]} for r in rows]
+    rows = _query_csv(query, params)
+    return [{"studyId": r.get("studyId"), "cleanReportText": r.get("cleanReportText")} for r in rows]
 
 @app.get("/studies/count")
 def get_studies_count(
@@ -285,39 +306,44 @@ def get_studies_count(
     value: str | None = Query(default=None, description="Valor del hallazgo (e.g., 'Certainly True')"),
     min_age: int = Query(default=18, ge=0, description="Edad mínima inclusiva"),
     max_age: int = Query(default=100, ge=0, description="Edad máxima inclusiva"),
-    sample_1k: bool = Query(default=False, description="Limitar a los studyID del CSV de sample 1k"),
-    label_group: str | None = Query(default=None, description="Filtrar a los studyID cuyo group en el CSV 1k coincida"),
+    sample_1k: bool = Query(default=False, description="Limitar a los StudyInstanceUID presentes en sample 1k"),
+    label_group: str | None = Query(default=None, description="Filtrar a los UID cuyo group en el CSV 1k coincida"),
 ):
     try:
-        base_select = "SELECT COUNT(DISTINCT studyID) FROM reports"
-        params: list = []
-        where_clauses = ["studyID IS NOT NULL"]
+        uid_col = _detect_uid_col_in_csv(FINDINGS_CSV) or "StudyInstanceUID"
+        cols = set(_csv_columns(FINDINGS_CSV))
+        base_select = f'SELECT COUNT(DISTINCT "{uid_col}") AS c FROM read_csv_auto(?, header=True)'
+        params: list = [FINDINGS_CSV]
+        where_clauses = [f'"{uid_col}" IS NOT NULL']
 
         if hallazgo is not None and value is not None:
             valid_cols = set(_finding_columns())
             if hallazgo not in valid_cols:
                 raise HTTPException(status_code=400, detail=f"Hallazgo desconocido: {hallazgo}")
-            where_clauses.append(f"{_quote_ident(hallazgo)} = ?")
+            where_clauses.append(f'{_quote_ident(hallazgo)} = ?')
             params.append(value)
 
         if min_age > max_age:
             min_age, max_age = max_age, min_age
-        where_clauses.append("age BETWEEN ? AND ?")
-        params.extend([min_age, max_age])
+        if "age" in cols:
+            where_clauses.append("age BETWEEN ? AND ?")
+            params.extend([min_age, max_age])
 
         if sample_1k:
             if not os.path.exists(SAMPLE_1K_CSV_PATH):
                 raise HTTPException(status_code=503, detail=f"CSV 1k no disponible en ruta: {SAMPLE_1K_CSV_PATH}")
-            where_clauses.append('studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?))')
-            params.append(SAMPLE_1K_CSV_PATH)
+            s_uid = _detect_uid_col_in_csv(SAMPLE_1K_CSV_PATH) or "StudyInstanceUID"
             if label_group:
-                where_clauses[-1] = 'studyID IN (SELECT DISTINCT "studyID" FROM read_csv_auto(?) WHERE "group" = ?)'
-                params.append(label_group)
+                where_clauses.append(f'"{uid_col}" IN (SELECT DISTINCT "{s_uid}" FROM read_csv_auto(?, header=True) WHERE "group" = ?)')
+                params.extend([SAMPLE_1K_CSV_PATH, label_group])
+            else:
+                where_clauses.append(f'"{uid_col}" IN (SELECT DISTINCT "{s_uid}" FROM read_csv_auto(?, header=True))')
+                params.append(SAMPLE_1K_CSV_PATH)
 
         where_sql = (" WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
         query = base_select + where_sql
-        with duckdb.connect(DB_PATH, read_only=True) as con:
-            count = con.execute(query, params).fetchone()[0]
+        rows = _query_csv(query, params)
+        count = rows[0].get("c", 0) if rows else 0
         return {"count": int(count)}
     except HTTPException:
         raise
@@ -433,50 +459,54 @@ def list_dicom_studies(limit: int = Query(default=10, ge=1, le=100)):
 
 @app.get("/studies/{study_id}/text-info")
 def get_study_text_info(study_id: str):
-    """Return textual information assembled from CSVs for a given studyID.
+    """Return textual information assembled from the three CSV sources using StudyInstanceUID.
 
-    Sources:
-    - 100k_llm_findings_labels.csv: general findings row + label statuses
-    - sections_of_report.csv: projections, history, finding_sentences_* fields
-    - labels_per_sentence_5k.csv: per-sentence annotations
+    This function auto-detects the UID column name in each CSV (StudyInstanceUID/studyInstanceUID/StudyID/studyID)
+    and uses the current CSVs as the single source of truth (no anon mapping required).
     """
     try:
         if not (os.path.exists(FINDINGS_CSV) and os.path.exists(SECTIONS_CSV) and os.path.exists(SENTENCES_CSV)):
             missing = [p for p in (FINDINGS_CSV, SECTIONS_CSV, SENTENCES_CSV) if not os.path.exists(p)]
             raise HTTPException(status_code=503, detail=f"CSV(s) faltantes: {', '.join(missing)}")
 
-        # Findings row and label statuses
-        # Discover columns to identify label columns (exclude known metadata fields)
-        desc = _query_csv("DESCRIBE SELECT * FROM read_csv_auto(?, header=True) LIMIT 0", [FINDINGS_CSV])
-        all_cols = [c.get("column_name") for c in desc if isinstance(c, dict)]
+        # Detect UID columns per CSV
+        f_uid = _detect_uid_col_in_csv(FINDINGS_CSV)
+        sec_uid = _detect_uid_col_in_csv(SECTIONS_CSV)
+        sen_uid = _detect_uid_col_in_csv(SENTENCES_CSV)
+        if not all([f_uid, sec_uid, sen_uid]):
+            raise HTTPException(status_code=500, detail="No se pudo detectar columna UID en uno o más CSV (findings/sections/sentences)")
+
+        # Discover label columns from findings (exclude metadata + uid)
+        all_cols = _csv_columns(FINDINGS_CSV)
         meta_cols = {
-            'clean_report_text', 'StudyID', 'age', 'views', 'study_date',
-            'regex_labels', 'report_text', 'report_path', 'llm_labels'
+            'clean_report_text', 'studyID', 'StudyID', 'StudyInstanceUID', 'studyInstanceUID',
+            'age', 'views', 'study_date', 'regex_labels', 'report_text', 'report_path', 'llm_labels'
         }
+        meta_cols.add(f_uid)
         label_cols = [c for c in all_cols if c and c not in meta_cols]
 
-        findings_sql = 'SELECT * FROM read_csv_auto(?, header=True) WHERE "StudyID" = ? LIMIT 1'
+        # Findings row
+        findings_sql = f'SELECT * FROM read_csv_auto(?, header=True) WHERE "{f_uid}" = ? LIMIT 1'
         f_rows = _query_csv(findings_sql, [FINDINGS_CSV, study_id])
         findings_block: Dict[str, Any] | None = None
         if f_rows:
             row = f_rows[0]
-            findings_block = {
-                "study_date": row.get("study_date"),
-                "age": row.get("age"),
-                "report_text": row.get("report_text"),
-                "regex_labels": row.get("regex_labels"),
-                "llm_labels": row.get("llm_labels"),
-            }
-            # Build label_status by collecting non-null values among label_cols
             label_status: Dict[str, Any] = {}
             for col in label_cols:
                 val = row.get(col)
                 if val is not None and val != "":
                     label_status[col] = val
-            findings_block["label_status"] = label_status
+            findings_block = {
+                "study_date": row.get("study_date"),
+                "age": row.get("age"),
+                "report_text": row.get("report_text") or row.get("clean_report_text"),
+                "regex_labels": row.get("regex_labels"),
+                "llm_labels": row.get("llm_labels"),
+                "label_status": label_status,
+            }
 
         # Sections
-        sections_sql = 'SELECT * FROM read_csv_auto(?, header=True) WHERE "StudyInstanceUID" = ? LIMIT 1'
+        sections_sql = f'SELECT * FROM read_csv_auto(?, header=True) WHERE "{sec_uid}" = ? LIMIT 1'
         s_rows = _query_csv(sections_sql, [SECTIONS_CSV, study_id])
         sections_block: Dict[str, Any] | None = None
         if s_rows:
@@ -484,25 +514,24 @@ def get_study_text_info(study_id: str):
             sections_block = {
                 "projections": s.get("projections"),
                 "history": s.get("history"),
+                "original_report": s.get("original_report") or s.get("report_text"),
                 "finding_sentences_es": s.get("finding_sentences_es"),
                 "finding_sentences_en": s.get("finding_sentences_en"),
+                "labels_list": s.get("labels_list"),
             }
 
-        # Sentences
-        sentences_sql = 'SELECT * FROM read_csv_auto(?, header=True) WHERE "StudyInstanceUID" = ?'
+        # Sentences (supports mapped schema: sentenceID, sentence, label, group)
+        sentences_sql = f'SELECT * FROM read_csv_auto(?, header=True) WHERE "{sen_uid}" = ?'
         sent_rows = _query_csv(sentences_sql, [SENTENCES_CSV, study_id])
-        # sort by sentence_index if present
-        if sent_rows and 'sentence_index' in sent_rows[0]:
-            try:
-                sent_rows.sort(key=lambda r: (r.get('sentence_index') is None, r.get('sentence_index')))
-            except Exception:
-                pass
+        # Basic projection keeping compatibility on naming
         sentences = [
             {
-                "sentence_index": r.get("sentence_index"),
-                "sentence_text": r.get("sentence_text"),
+                "sentence_index": r.get("sentence_index") or r.get("sentenceID"),
+                "sentence_text": r.get("sentence_text") or r.get("sentence"),
                 "positive_or_not": r.get("positive_or_not"),
                 "findings_affirmed": r.get("findings_affirmed"),
+                "label": r.get("label"),
+                "group": r.get("group"),
             }
             for r in sent_rows
         ]
@@ -512,6 +541,11 @@ def get_study_text_info(study_id: str):
             "findings": findings_block,
             "sections": sections_block,
             "sentences": sentences,
+            "sources": {
+                "findings_csv": FINDINGS_CSV,
+                "sections_csv": SECTIONS_CSV,
+                "sentences_csv": SENTENCES_CSV,
+            }
         }
     except HTTPException:
         raise
