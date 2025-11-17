@@ -104,3 +104,16 @@ frontend-pm2-static: ## Servir build estático con 'serve'
 	cd frontend && npm ci && npm run build
 	pm2 start serve --name dicom-frontend --frontend/dist --single --listen $(FRONTEND_PORT)
 	pm2 save
+
+serve-frontend:
+	sudo sh -c 'docker rm -f dicom-frontend 2>/dev/null || true; docker run --rm -v /home/dolobos/DICOM_Viewer/frontend:/app -w /app node:20-alpine sh -c "npm ci && npm run build"; docker run -d --name dicom-frontend -p 5173:80 -v /home/dolobos/DICOM_Viewer/frontend/dist:/usr/share/nginx/html:ro nginx:1.25-alpine'
+
+serve-backend:
+	source .venv/bin/activate
+	pip install -r backend/requirements.txt
+	sudo lsof -t -i:8000 | xargs -r kill
+	sudo systemctl daemon-reload
+	sudo systemctl enable --now dicom-backend
+	sudo systemctl status dicom-backend
+	sudo journalctl -u dicom-backend -f
+	
