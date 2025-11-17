@@ -17,7 +17,7 @@ DICOM_METADATA_PARQUET_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/m
 # CSV sample 1k (CentaurLabs)
 SAMPLE_1K_CSV_PATH = os.environ.get(
     "SAMPLE_1K_CSV_PATH",
-    "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm/sample_1k_for_centaurlabs.csv",
+    "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm/legacy_deprecated_data/sample_1k_for_centaurlabs.csv",
 )
 # CSV de grupos (Label -> Group)
 LABEL_GROUPS_CSV_PATH = os.environ.get(
