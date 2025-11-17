@@ -27,7 +27,7 @@ LABEL_GROUPS_CSV_PATH = os.environ.get(
 
 # Base CSVs for textual info per StudyID
 CSV_BASE_PATH = "/mnt/nas_anakena/datasets/uc-cxr/processed_data/reports_and_labels_llm"
-FINDINGS_CSV = os.path.join(CSV_BASE_PATH, "100k_llm_findings_labels.csv")
+FINDINGS_CSV = os.path.join(CSV_BASE_PATH,"legacy_deprecated_data", "100k_llm_findings_labels.csv")
 SECTIONS_CSV = os.path.join(CSV_BASE_PATH, "sections_of_report.csv")
 SENTENCES_CSV = os.path.join(CSV_BASE_PATH, "labels_per_sentence_mapped.csv")
 
