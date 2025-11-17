@@ -28,6 +28,7 @@ function App() {
   const [labelGroups, setLabelGroups] = useState<Record<string, string[]>>({})
   const [groups, setGroups] = useState<string[]>([])
   const [selectedGroup, setSelectedGroup] = useState<string>(params.get("label_group") || "")
+  const [searchId, setSearchId] = useState<string>(params.get("study_id") || "")
   
 
   function setQueryParams(qp: Record<string, string | number | boolean | undefined>) {
@@ -40,6 +41,11 @@ function App() {
   }
 
   useEffect(() => {
+    const id = searchId.trim()
+    if (id) {
+      setQueryParams({ page, study_id: id })
+      return
+    }
     const effectiveFinding = selectedFinding === ANY_IN_GROUP ? undefined : selectedFinding
     setQueryParams({
       page,
@@ -50,38 +56,48 @@ function App() {
       sample_1k: useSample1k,
       label_group: useSample1k && selectedGroup ? selectedGroup : undefined,
     })
-  }, [page, selectedFinding, selectedValue, minAge, maxAge, useSample1k, selectedGroup])
+  }, [page, selectedFinding, selectedValue, minAge, maxAge, useSample1k, selectedGroup, searchId])
 
   const fetchPage = async (
-    pageNum = 1, 
-    finding?: string, 
-    val?: FindingValue, 
-    minA: number = minAge, 
+    pageNum = 1,
+    finding?: string,
+    val?: FindingValue,
+    minA: number = minAge,
     maxA: number = maxAge,
     sample: boolean = useSample1k,
-    group?: string
+    group?: string,
+    studyId?: string
   ) => {
     const base = "http://localhost:8000"
     const params = new URLSearchParams()
     params.set("page", String(pageNum))
     params.set("page_size", String(pageSize))
-    params.set("min_age", String(minA))
-    params.set("max_age", String(maxA))
-    params.set("sample_1k", sample ? "true" : "false")
-    if (finding) params.set("hallazgo", finding)
-    if (val) params.set("value", val)
-    if (sample && group) params.set("label_group", group)
+    const id = (studyId || "").trim()
+    if (id) {
+      params.set("study_id", id)
+    } else {
+      params.set("min_age", String(minA))
+      params.set("max_age", String(maxA))
+      params.set("sample_1k", sample ? "true" : "false")
+      if (finding) params.set("hallazgo", finding)
+      if (val) params.set("value", val)
+      if (sample && group) params.set("label_group", group)
+    }
 
     const [studiesRes, countRes] = await Promise.all([
       fetch(`${base}/studies?${params.toString()}`),
       (() => {
         const paramsCount = new URLSearchParams()
-        if (finding) paramsCount.set("hallazgo", finding)
-        if (val) paramsCount.set("value", val)
-        paramsCount.set("min_age", String(minA))
-        paramsCount.set("max_age", String(maxA))
-        paramsCount.set("sample_1k", sample ? "true" : "false")
-        if (group && sample) paramsCount.set("label_group", group)
+        if (id) {
+          paramsCount.set("study_id", id)
+        } else {
+          if (finding) paramsCount.set("hallazgo", finding)
+          if (val) paramsCount.set("value", val)
+          paramsCount.set("min_age", String(minA))
+          paramsCount.set("max_age", String(maxA))
+          paramsCount.set("sample_1k", sample ? "true" : "false")
+          if (group && sample) paramsCount.set("label_group", group)
+        }
         return fetch(`${base}/studies/count?${paramsCount.toString()}`)
       })(),
     ])
@@ -127,7 +143,8 @@ function App() {
           minAge,
           maxAge,
           useSample1k,
-          selectedGroup || undefined
+          selectedGroup || undefined,
+          searchId || undefined
         )
         setStudies(studiesData)
         setTotal(total)
@@ -169,29 +186,32 @@ function App() {
   const onFilter = async () => {
     setFiltering(true)
     try {
+      const id = searchId.trim()
       const effectiveFinding = selectedFinding === ANY_IN_GROUP ? undefined : selectedFinding
       setQueryParams({
         page: 1,
-        finding: effectiveFinding,
-        value: temporallySelectedValue,
-        min_age: minAge,
-        max_age: maxAge,
-        sample_1k: useSample1k,
-        label_group: useSample1k && selectedGroup ? selectedGroup : undefined,
+        study_id: id || undefined,
+        finding: id ? undefined : effectiveFinding,
+        value: id ? undefined : temporallySelectedValue,
+        min_age: id ? undefined : minAge,
+        max_age: id ? undefined : maxAge,
+        sample_1k: id ? undefined : useSample1k,
+        label_group: id ? undefined : (useSample1k && selectedGroup ? selectedGroup : undefined),
       })
       const { studiesData, total } = await fetchPage(
         1,
-        effectiveFinding,
-        temporallySelectedValue,
-        minAge,
-        maxAge,
-        useSample1k,
-        selectedGroup || undefined,
+        id ? undefined : effectiveFinding,
+        id ? undefined : temporallySelectedValue,
+        id ? 0 : minAge,
+        id ? 0 : maxAge,
+        id ? false : useSample1k,
+        id ? undefined : (selectedGroup || undefined),
+        id || undefined,
       )
       setStudies(studiesData)
       setTotal(total)
       setPage(1)
-      setSelectedValue(temporallySelectedValue)
+      if (!id) setSelectedValue(temporallySelectedValue)
     } catch (e) {
       console.error(e)
     } finally {
@@ -203,24 +223,27 @@ function App() {
     if (pageNum === page || filtering) return
     setFiltering(true)
     try {
+      const id = searchId.trim()
       const effectiveFinding = selectedFinding === ANY_IN_GROUP ? undefined : selectedFinding
       setQueryParams({
         page: pageNum,
-        finding: effectiveFinding,
-        value: selectedValue,
-        min_age: minAge,
-        max_age: maxAge,
-        sample_1k: useSample1k,
-        label_group: useSample1k && selectedGroup ? selectedGroup : undefined,
+        study_id: id || undefined,
+        finding: id ? undefined : effectiveFinding,
+        value: id ? undefined : selectedValue,
+        min_age: id ? undefined : minAge,
+        max_age: id ? undefined : maxAge,
+        sample_1k: id ? undefined : useSample1k,
+        label_group: id ? undefined : (useSample1k && selectedGroup ? selectedGroup : undefined),
       })
       const { studiesData } = await fetchPage(
         pageNum,
-        effectiveFinding,
-        selectedValue,
-        minAge,
-        maxAge,
-        useSample1k,
-        selectedGroup || undefined,
+        id ? undefined : effectiveFinding,
+        id ? undefined : selectedValue,
+        id ? 0 : minAge,
+        id ? 0 : maxAge,
+        id ? false : useSample1k,
+        id ? undefined : (selectedGroup || undefined),
+        id || undefined,
       )
       setStudies(studiesData)
       setPage(pageNum)
@@ -287,12 +310,24 @@ function App() {
 
           <div className="grid md:grid-cols-6 gap-4 items-end">
             <div className="space-y-2">
+              <label className="block text-sm font-medium text-slate-700">Study ID (exact)</label>
+              <input
+                type="text"
+                value={searchId}
+                onChange={(e) => setSearchId(e.target.value)}
+                placeholder="e.g. 1.3.51.0.1.1.*"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
+                disabled={loading || filtering}
+              />
+            </div>
+
+            <div className="space-y-2">
               <label className="block text-sm font-medium text-slate-700">Finding</label>
               <select
                 value={selectedFinding}
                 onChange={(e) => setSelectedFinding(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
-                disabled={loading || filtering}
+                disabled={loading || filtering || !!searchId.trim()}
               >
                 {findings.map((f) => (
                   <option key={f} value={f}>
@@ -310,7 +345,7 @@ function App() {
                 value={useSample1k ? selectedGroup : ""}
                 onChange={(e) => setSelectedGroup(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900 disabled:bg-slate-100"
-                disabled={!useSample1k || loading || filtering}
+                disabled={!useSample1k || loading || filtering || !!searchId.trim()}
               >
                 <option value="">All groups</option>
                 {groups.map((g) => (
@@ -325,7 +360,7 @@ function App() {
                 value={selectedValue}
                 onChange={(e) => setTemporallySelectedValue(e.target.value as FindingValue)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
-                disabled={loading || filtering}
+                disabled={loading || filtering || !!searchId.trim()}
               >
                 {(["Certainly True", "Maybe True", "Unknown", "Maybe False", "Certainly False"] as FindingValue[]).map(
                   (v) => (
@@ -345,7 +380,7 @@ function App() {
                 value={minAge}
                 onChange={(e) => setMinAge(Number.isNaN(parseInt(e.target.value)) ? 0 : parseInt(e.target.value))}
                 className="w-24 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
-                disabled={loading || filtering}
+                disabled={loading || filtering || !!searchId.trim()}
               />
             </div>
 
@@ -357,7 +392,7 @@ function App() {
                 value={maxAge}
                 onChange={(e) => setMaxAge(Number.isNaN(parseInt(e.target.value)) ? 0 : parseInt(e.target.value))}
                 className="w-24 px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-900"
-                disabled={loading || filtering}
+                disabled={loading || filtering || !!searchId.trim()}
               />
             </div>
 
@@ -381,7 +416,7 @@ function App() {
                       setSelectedGroup("")
                     }
                   }}
-                  disabled={loading || filtering}
+                  disabled={loading || filtering || !!searchId.trim()}
                   className="absolute inset-0 opacity-0 cursor-pointer"
                 />
               </div>

@@ -256,6 +256,7 @@ def get_studies(
     page_size: int = Query(default=20, ge=1, le=100, description="Cantidad de resultados por página"),
     sample_1k: bool = Query(default=False, description="Limitar a los StudyInstanceUID presentes en sample 1k"),
     label_group: str | None = Query(default=None, description="Filtrar a los UID cuyo group en el CSV 1k coincida"),
+    study_id: str | None = Query(default=None, description="Buscar por StudyInstanceUID exacto; ignora otros filtros"),
 ):
     # Normalize age bounds
     if min_age > max_age:
@@ -269,6 +270,15 @@ def get_studies(
     base_select = f'SELECT "{uid_col}" AS studyId' + (f', MIN("{text_col}") AS cleanReportText' if text_col else ', NULL AS cleanReportText') + ' FROM read_csv_auto(?, header=True)'
     params: list = [FINDINGS_CSV]
     where_clauses = [f'"{uid_col}" IS NOT NULL']
+
+    # If study_id is provided, short-circuit all other filters
+    if study_id and study_id.strip():
+        where_sql = f' WHERE "{uid_col}" = ?'
+        params.append(study_id.strip())
+        query = base_select + where_sql + f' GROUP BY "{uid_col}" ORDER BY "{uid_col}" LIMIT ? OFFSET ?'
+        params.extend([page_size, (page - 1) * page_size])
+        rows = _query_csv(query, params)
+        return [{"studyId": r.get("studyId"), "cleanReportText": r.get("cleanReportText")} for r in rows]
 
     if hallazgo is not None and value is not None:
         valid_cols = set(_finding_columns())
@@ -308,6 +318,7 @@ def get_studies_count(
     max_age: int = Query(default=100, ge=0, description="Edad máxima inclusiva"),
     sample_1k: bool = Query(default=False, description="Limitar a los StudyInstanceUID presentes en sample 1k"),
     label_group: str | None = Query(default=None, description="Filtrar a los UID cuyo group en el CSV 1k coincida"),
+    study_id: str | None = Query(default=None, description="Buscar por StudyInstanceUID exacto; ignora otros filtros"),
 ):
     try:
         uid_col = _detect_uid_col_in_csv(FINDINGS_CSV) or "StudyInstanceUID"
@@ -315,6 +326,13 @@ def get_studies_count(
         base_select = f'SELECT COUNT(DISTINCT "{uid_col}") AS c FROM read_csv_auto(?, header=True)'
         params: list = [FINDINGS_CSV]
         where_clauses = [f'"{uid_col}" IS NOT NULL']
+
+        # If study_id is provided, short-circuit to exact match count
+        if study_id and study_id.strip():
+            query = f'SELECT COUNT(*) AS c FROM read_csv_auto(?, header=True) WHERE "{uid_col}" = ?'
+            rows = _query_csv(query, [FINDINGS_CSV, study_id.strip()])
+            c = rows[0].get("c", 0) if rows else 0
+            return {"count": int(c)}
 
         if hallazgo is not None and value is not None:
             valid_cols = set(_finding_columns())
