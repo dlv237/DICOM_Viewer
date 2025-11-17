@@ -450,12 +450,12 @@ def get_study_text_info(study_id: str):
         desc = _query_csv("DESCRIBE SELECT * FROM read_csv_auto(?, header=True) LIMIT 0", [FINDINGS_CSV])
         all_cols = [c.get("column_name") for c in desc if isinstance(c, dict)]
         meta_cols = {
-            'clean_report_text', 'StudyInstanceUID', 'age', 'views', 'study_date',
+            'clean_report_text', 'StudyID', 'age', 'views', 'study_date',
             'regex_labels', 'report_text', 'report_path', 'llm_labels'
         }
         label_cols = [c for c in all_cols if c and c not in meta_cols]
 
-        findings_sql = 'SELECT * FROM read_csv_auto(?, header=True) WHERE "StudyInstanceUID" = ? LIMIT 1'
+        findings_sql = 'SELECT * FROM read_csv_auto(?, header=True) WHERE "StudyID" = ? LIMIT 1'
         f_rows = _query_csv(findings_sql, [FINDINGS_CSV, study_id])
         findings_block: Dict[str, Any] | None = None
         if f_rows:
